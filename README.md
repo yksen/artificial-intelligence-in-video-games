@@ -10,14 +10,14 @@ This project focuses on developing an autonomous AI agent for Minecraft using th
 
 ## Milestones
 
-### Milestone 1: Foundation & Resource Independence
+### Milestone 1: Foundation & Resource Independence (30.04.2026)
 The bot should be capable of basic survival and fundamental game progression.
 * **Capabilities**: Predictable navigation, obstacle avoidance, basic block breaking/placing.
 * **Resource Gathering**: The bot can autonomously harvest wood, mine stone and iron, and smelt ores.
 * **Crafting & Survival**: The bot can craft essential tools (pickaxes, swords) and armor, manage hunger by consuming food, and survive basic overland hostile mobs.
 * **Goal**: The bot is fully prepared to enter the Nether safely (has a diamond pickaxe or knows how to build a portal using buckets).
 
-### Milestone 2: Dimensions & The Dragon
+### Milestone 2: Dimensions & The Dragon (11.06.02026)
 The bot should be able to execute the complex sequence of events required to beat the game.
 * **The Nether**: Navigate the dangerous Nether terrain, locate a Nether Fortress, farm Blazes for rods, and barter/hunt for Ender Pearls.
 * **The Stronghold**: Craft Eyes of Ender, use them to triangulate the Stronghold, navigate the stronghold maze, and activate the End Portal.
