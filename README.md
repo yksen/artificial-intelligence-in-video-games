@@ -2,20 +2,31 @@
 
 This project focuses on developing an autonomous AI agent for Minecraft using the [mineflayer](https://github.com/PrismarineJS/mineflayer) Python/Node.js framework. The ultimate objective is to program a bot capable of completing the game from scratch, spawning in a new world, gathering resources, surviving, and eventually traveling to the End dimension to defeat the Ender Dragon. The project will explore complex AI decision-making, pathfinding in a 3D voxel environment, resource management, and combat strategies.
 
-See [Assumptions & Scope](docs/assumptions-and-scope.md) for project boundaries and current implementation limits.
+See [Scope](docs/SCOPE.md) for project boundaries and current implementation limits.
 
 ## Current Implementation
 
-Milestone 1 is implemented as a runnable Mineflayer bot in `src/bot.js`. On spawn, the bot can:
+Milestone 1 is implemented as a **Finite State Machine** split across two files:
 
-* use pathfinding with block breaking and scaffold placement enabled;
-* harvest nearby logs, craft planks, sticks, a crafting table, and starter tools;
-* mine cobblestone, craft stone tools, mine iron ore, place a furnace, and smelt iron;
-* craft an iron pickaxe and bucket when enough ingots are available;
-* automatically eat available food and hunt nearby passive animals for food;
-* attack nearby hostile overland mobs with the best available weapon.
+* `src/bot.js` — thin entry point: bot creation, plugin loading, viewer startup, passive combat handler, chat commands.
+* `src/fsm.js` — `MilestoneOneFSM` class containing all states, collection logic, crafting helpers, and inventory utilities.
 
-The bot considers the first milestone complete when it has either a diamond pickaxe or a bucket-based Nether portal route available.
+### Architecture
+
+The FSM uses an **IDLE hub** pattern: after every action — whether it completes normally or throws — the machine returns to `IDLE`, which inspects the current inventory and derives the next state to enter. This means the bot self-heals automatically: if it dies, loses items, or gets interrupted by combat, the next `IDLE` pass simply re-evaluates what is still missing and picks up from there.
+
+States: `IDLE` → `COLLECT_LOGS` → `CRAFT_BASICS` → `COLLECT_COBBLESTONE` → `CRAFT_STONE_TOOLS` → `COLLECT_IRON` → `SMELT_IRON` → `CRAFT_IRON_GEAR` → `DONE`
+
+| Layer | Mechanism |
+|---|---|
+| Goal progression | FSM with IDLE hub re-evaluating inventory on every cycle |
+| Error recovery | All state handlers catch exceptions and return to IDLE |
+| Unreachable blocks | Per-block skip set; cleared after 3 empty passes |
+| Combat | `physicsTick` listener triggers `mineflayer-pvp`; collection waits for combat to end before resuming |
+| Eating | Delegated to `mineflayer-auto-eat` |
+| Navigation | `mineflayer-pathfinder` (A*) |
+
+The bot considers Milestone 1 complete when it has either a diamond pickaxe or a bucket (bucket-based Nether portal route).
 
 ## Setup
 
@@ -32,7 +43,35 @@ npm install
 
 ## Run
 
-Start a local server, then run:
+### Local server
+
+Create a directory for the server, download the latest vanilla server JAR, and accept the EULA:
+
+```bash
+mkdir -p ~/minecraft-server && cd ~/minecraft-server
+curl -Lo server.jar "$(curl -s https://launchermeta.mojang.com/mc/game/version_manifest.json \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); latest=d['latest']['release']; \
+    v=next(x for x in d['versions'] if x['id']==latest); print(v['url'])" \
+  | xargs curl -s \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['downloads']['server']['url'])")"
+echo "eula=true" > eula.txt
+```
+
+Enable offline mode so the bot can connect without a Microsoft account, then start the server:
+
+```bash
+java -Xmx2G -Xms1G -jar server.jar nogui --world world &
+# Wait for "Done" in output, then:
+echo "online-mode=false" >> server.properties
+# Restart the server once to apply the setting:
+kill %1 && java -Xmx2G -Xms1G -jar server.jar nogui
+```
+
+The server listens on port 25565 by default. Leave it running in this terminal (or use `tmux`/`screen`), then open a new terminal to run the bot.
+
+### Bot
+
+From the project directory, run:
 
 ```bash
 npm start
@@ -67,19 +106,3 @@ Validate the source files without connecting to Minecraft:
 ```bash
 npm run check
 ```
-
-## Milestones
-
-### Milestone 1: Foundation & Resource Independence (05.05.2026)
-The bot should be capable of basic survival and fundamental game progression.
-* **Capabilities**: Predictable navigation, obstacle avoidance, basic block breaking/placing.
-* **Resource Gathering**: The bot can autonomously harvest wood, mine stone and iron, and smelt ores.
-* **Crafting & Survival**: The bot can craft essential tools (pickaxes, swords) and armor, manage hunger by consuming food, and survive basic overland hostile mobs.
-* **Goal**: The bot is fully prepared to enter the Nether safely (has a diamond pickaxe or knows how to build a portal using buckets).
-
-### Milestone 2: Dimensions & The Dragon (16.06.2026)
-The bot should be able to execute the complex sequence of events required to beat the game.
-* **The Nether**: Navigate the dangerous Nether terrain, locate a Nether Fortress, farm Blazes for rods, and barter/hunt for Ender Pearls.
-* **The Stronghold**: Craft Eyes of Ender, use them to triangulate the Stronghold, navigate the stronghold maze, and activate the End Portal.
-* **The End**: Enter the End, destroy the End Crystals (using projectiles or pillaring), and successfully fight and defeat the Ender Dragon.
-* **Goal**: Full, unassisted completion of the Minecraft main storyline.
