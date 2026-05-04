@@ -5,7 +5,8 @@ export const config = {
   auth: process.env.MINECRAFT_AUTH ?? 'offline',
   version: process.env.MINECRAFT_VERSION || undefined,
   autoStart: process.env.MILESTONE_AUTOSTART !== 'false',
-  collectionRadius: Number.parseInt(process.env.COLLECTION_RADIUS ?? '64', 10),
+  collectionRadius: Number.parseInt(process.env.COLLECTION_RADIUS ?? '128', 10),
+  viewerPort: Number.parseInt(process.env.VIEWER_PORT ?? '3007', 10),
   targets: {
     logs: Number.parseInt(process.env.TARGET_LOGS ?? '12', 10),
     cobblestone: Number.parseInt(process.env.TARGET_COBBLESTONE ?? '24', 10),
