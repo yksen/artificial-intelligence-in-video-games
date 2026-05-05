@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { loader as autoEat } from 'mineflayer-auto-eat'
 import { config } from './config.js'
-import { SpeedrunBot } from './speedrun.js'
+import { Bot } from './speedrun.js'
 
 const require = createRequire(import.meta.url)
 const mineflayer = require('mineflayer')
@@ -13,7 +13,6 @@ const HOSTILE_MOBS = new Set([
   'zombie', 'skeleton', 'spider', 'creeper', 'witch',
   'drowned', 'husk', 'stray', 'slime', 'phantom',
 ])
-
 
 const bot = mineflayer.createBot({
   host: config.host,
@@ -47,7 +46,7 @@ bot.once('spawn', () => {
   })
   bot.autoEat.enableAuto()
 
-  console.log(`Connected as ${bot.username} on ${config.host}:${config.port}`)
+  console.log(`[${timestamp()}] Connected as ${bot.username} on ${config.host}:${config.port}`)
 
   bot.on('physicsTick', () => {
     if (!runner?.running) return
@@ -60,13 +59,8 @@ bot.once('spawn', () => {
     if (threat) bot.pvp.attack(threat).catch(() => { })
   })
 
-  if (config.autoStart) {
-    sleep(3000).then(startSpeedrun)
-  } else {
-    console.log('Auto-start disabled. Type "start" in chat to begin.')
-  }
+  startSpeedrun()
 })
-
 
 bot.on('chat', (username, message) => {
   if (username === bot.username) return
@@ -81,35 +75,20 @@ bot.on('chat', (username, message) => {
     bot.pvp.stop().catch(() => { })
     bot.chat('Stopped.')
   }
-
-  if (cmd === 'status') {
-    bot.chat(runner ? runner.summary() : 'Not running.')
-  }
-
-  if (cmd === 'come') {
-    const target = bot.players[username]?.entity
-    if (!target) { bot.chat("I can't see you."); return }
-    const { x, y, z } = target.position
-    bot.pathfinder.setGoal(new goals.GoalNear(x, y, z, 1))
-  }
 })
 
-
-bot.on('error', err => console.error('Bot error:', err.message))
-bot.on('kicked', reason => console.error('Kicked:', JSON.stringify(reason)))
-bot.on('end', () => { console.log('Disconnected.'); runner?.stop() })
-
+bot.on('error', err => console.error(`[${timestamp()}] Bot error:`, err.message))
+bot.on('kicked', reason => console.error(`[${timestamp()}] Kicked:`, JSON.stringify(reason)))
+bot.on('end', () => { console.log(`[${timestamp()}] Disconnected.`); runner?.stop() })
 
 function startSpeedrun() {
   if (runner?.running) { bot.chat('Already running.'); return }
-  runner = new SpeedrunBot(bot, config)
+  runner = new Bot(bot, config)
   runner.run().catch(err => {
     const message = `[${timestamp()}] Fatal: ${err.message}`
     console.error(message)
   })
 }
-
-const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 function timestamp() {
   const now = new Date()

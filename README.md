@@ -14,9 +14,9 @@ Milestone 1 is implemented as a **reactive Hierarchical Task Network (HTN)** spl
 
 ### Architecture
 
-The planner starts from a `complete_game` compound task and currently decomposes it into the Milestone 1 `prepare_for_nether` task. Every short tick it rebuilds the HTN plan from current inventory/world state and runs only the next primitive action, keeping the old fail-fast behavior while making the high-level task tree ready for Nether, Stronghold, and End methods later. Failed or unreachable block targets are skipped for a short TTL, so the bot quickly tries a different log, stone, or ore instead of spending many seconds on the same bad path.
+The planner starts from a `complete_game` compound task and currently decomposes it into the Milestone 1 `enter_nether` task. Every short tick it rebuilds the HTN plan from current inventory/world state and runs only the next primitive action, keeping the old fail-fast behavior while making the high-level task tree ready for Fortress, Stronghold, and End methods later. Failed or unreachable block targets are skipped for a short TTL, so the bot quickly tries a different log, stone, ore, or gravel block instead of spending many seconds on the same bad path.
 
-Current HTN decomposition: complete game → prepare for Nether → wooden pickaxe → stone tools → iron stock → fuel → smelting → bucket route → done.
+Current HTN decomposition: complete game → enter Nether → prepare bucket route → craft flint and steel → collect portal supports → cast lava-water portal → light portal → enter portal → done.
 
 | Layer | Mechanism |
 |---|---|
@@ -30,7 +30,7 @@ Current HTN decomposition: complete game → prepare for Nether → wooden picka
 | Eating | Delegated to `mineflayer-auto-eat` |
 | Navigation | `mineflayer-pathfinder` (A*) with short search budgets |
 
-The bot considers Milestone 1 complete when it has either a diamond pickaxe or a bucket (bucket-based Nether portal route).
+The bot considers the current goal complete once it changes dimension into the Nether. The implemented route uses one bucket, nearby source water, at least ten nearby lava source blocks, support blocks for casting, and flint and steel for ignition.
 
 ## Setup
 
@@ -96,8 +96,8 @@ Useful optional variables:
 * `MINECRAFT_VERSION`: pins the Minecraft protocol version when auto-detection is not enough.
 * `BOT_AUTOSTART=false`: connects without starting the milestone routine.
 * `COLLECTION_RADIUS=64`: changes the block and mob search radius.
-* `TARGET_LOGS`, `TARGET_COBBLESTONE`, `TARGET_RAW_IRON`, `TARGET_FOOD`: tune milestone resource targets. `TARGET_LOGS` now defaults to 3 starter logs for faster progression.
-* `PATHFINDER_TIMEOUT_MS`, `COLLECT_BLOCK_TIMEOUT_MS`, `COLLECT_BATCH_SIZE`, `CRAFTING_STEP_TIMEOUT_MS`, `DROP_PICKUP_RADIUS`, `DROP_PICKUP_TIMEOUT_MS`: tune how aggressively the planner skips slow targets.
+* `TARGET_LOGS`, `TARGET_COBBLESTONE`, `TARGET_RAW_IRON`, `TARGET_PORTAL_SUPPORT_BLOCKS`, `TARGET_FOOD`: tune milestone resource targets. `TARGET_LOGS` defaults to 3 starter logs and `TARGET_PORTAL_SUPPORT_BLOCKS` defaults to 28 casting support blocks.
+* `PATHFINDER_TIMEOUT_MS`, `COLLECT_MOVE_TIMEOUT_MS`, `COLLECT_DIG_TIMEOUT_MS`, `COLLECT_BATCH_SIZE`, `CRAFTING_STEP_TIMEOUT_MS`, `DROP_PICKUP_RADIUS`, `DROP_PICKUP_TIMEOUT_MS`, `LIQUID_SEARCH_TIMEOUT_MS`, `LIQUID_SEARCH_STEP_BLOCKS`, `REJECTED_LAVA_TTL_MS`, `PORTAL_LAVA_RADIUS`, `PORTAL_BUILD_TIMEOUT_MS`, `PORTAL_LIGHT_TIMEOUT_MS`, `PORTAL_ENTER_TIMEOUT_MS`: tune how aggressively the planner skips slow targets, searches for water/lava, and runs portal casting/entry.
 
 In-game chat commands:
 
