@@ -8,10 +8,18 @@ export const config = {
   collectionRadius: Number.parseInt(process.env.COLLECTION_RADIUS ?? '128', 10),
   plannerTickMs: Number.parseInt(process.env.PLANNER_TICK_MS ?? '75', 10),
   actionTimeoutMs: Number.parseInt(process.env.ACTION_TIMEOUT_MS ?? '3000', 10),
-  collectBlockTimeoutMs: Number.parseInt(process.env.COLLECT_BLOCK_TIMEOUT_MS ?? '3000', 10),
+  collectMoveTimeoutMs: Number.parseInt(process.env.COLLECT_MOVE_TIMEOUT_MS ?? '8000', 10),
+  collectDigTimeoutMs: Number.parseInt(process.env.COLLECT_DIG_TIMEOUT_MS ?? '6000', 10),
   craftingTimeoutMs: Number.parseInt(process.env.CRAFTING_TIMEOUT_MS ?? '7000', 10),
   craftingStepTimeoutMs: Number.parseInt(process.env.CRAFTING_STEP_TIMEOUT_MS ?? '4000', 10),
   smeltingTimeoutMs: Number.parseInt(process.env.SMELTING_TIMEOUT_MS ?? '90000', 10),
+  liquidSearchTimeoutMs: Number.parseInt(process.env.LIQUID_SEARCH_TIMEOUT_MS ?? '30000', 10),
+  liquidSearchStepBlocks: Number.parseInt(process.env.LIQUID_SEARCH_STEP_BLOCKS ?? '48', 10),
+  rejectedLavaTtlMs: Number.parseInt(process.env.REJECTED_LAVA_TTL_MS ?? '180000', 10),
+  portalLavaRadius: Number.parseInt(process.env.PORTAL_LAVA_RADIUS ?? '12', 10),
+  portalBuildTimeoutMs: Number.parseInt(process.env.PORTAL_BUILD_TIMEOUT_MS ?? '240000', 10),
+  portalLightTimeoutMs: Number.parseInt(process.env.PORTAL_LIGHT_TIMEOUT_MS ?? '10000', 10),
+  portalEnterTimeoutMs: Number.parseInt(process.env.PORTAL_ENTER_TIMEOUT_MS ?? '30000', 10),
   pathfinderTimeoutMs: Number.parseInt(process.env.PATHFINDER_TIMEOUT_MS ?? '2500', 10),
   pathfinderTickTimeoutMs: Number.parseInt(process.env.PATHFINDER_TICK_TIMEOUT_MS ?? '35', 10),
   collectBatchSize: Number.parseInt(process.env.COLLECT_BATCH_SIZE ?? '2', 10),
@@ -22,6 +30,7 @@ export const config = {
     logs: Number.parseInt(process.env.TARGET_LOGS ?? '3', 10),
     cobblestone: Number.parseInt(process.env.TARGET_COBBLESTONE ?? '24', 10),
     rawIron: Number.parseInt(process.env.TARGET_RAW_IRON ?? '6', 10),
+    portalSupportBlocks: Number.parseInt(process.env.TARGET_PORTAL_SUPPORT_BLOCKS ?? '28', 10),
     food: Number.parseInt(process.env.TARGET_FOOD ?? '4', 10)
   }
 }
