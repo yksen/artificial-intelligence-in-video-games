@@ -6,25 +6,29 @@ See [Scope](docs/SCOPE.md) for project boundaries and current implementation lim
 
 ## Current Implementation
 
-Milestone 1 is implemented as a **Finite State Machine** split across two files:
+Milestone 1 is implemented as a **reactive Hierarchical Task Network (HTN)** split across three files:
 
 * `src/bot.js` — thin entry point: bot creation, plugin loading, viewer startup, passive combat handler, chat commands.
-* `src/fsm.js` — `MilestoneOneFSM` class containing all states, collection logic, crafting helpers, and inventory utilities.
+* `src/htn.js` — reusable HTN decomposer that turns compound tasks into primitive actions.
+* `src/speedrun.js` — Milestone 1 HTN domain, bounded resource collection, crafting helpers, smelting, and inventory utilities.
 
 ### Architecture
 
-The FSM uses an **IDLE hub** pattern: after every action — whether it completes normally or throws — the machine returns to `IDLE`, which inspects the current inventory and derives the next state to enter. This means the bot self-heals automatically: if it dies, loses items, or gets interrupted by combat, the next `IDLE` pass simply re-evaluates what is still missing and picks up from there.
+The planner starts from a `complete_game` compound task and currently decomposes it into the Milestone 1 `prepare_for_nether` task. Every short tick it rebuilds the HTN plan from current inventory/world state and runs only the next primitive action, keeping the old fail-fast behavior while making the high-level task tree ready for Nether, Stronghold, and End methods later. Failed or unreachable block targets are skipped for a short TTL, so the bot quickly tries a different log, stone, or ore instead of spending many seconds on the same bad path.
 
-States: `IDLE` → `COLLECT_LOGS` → `CRAFT_BASICS` → `COLLECT_COBBLESTONE` → `CRAFT_STONE_TOOLS` → `COLLECT_IRON` → `SMELT_IRON` → `CRAFT_IRON_GEAR` → `DONE`
+Current HTN decomposition: complete game → prepare for Nether → wooden pickaxe → stone tools → iron stock → fuel → smelting → bucket route → done.
 
 | Layer | Mechanism |
 |---|---|
-| Goal progression | FSM with IDLE hub re-evaluating inventory on every cycle |
-| Error recovery | All state handlers catch exceptions and return to IDLE |
-| Unreachable blocks | Per-block skip set; cleared after 3 empty passes |
-| Combat | `physicsTick` listener triggers `mineflayer-pvp`; collection waits for combat to end before resuming |
+| Goal progression | HTN methods that re-evaluate inventory every tick |
+| Error recovery | Bounded actions fail fast, cancel pathfinding, and immediately re-plan |
+| Unreachable blocks | Per-block skip TTL instead of slow multi-pass retries |
+| Dropped items | Fast pickup sweep for matching drops before and after mining |
+| Crafting stations | Cave-safe table/furnace placement against nearby floors, walls, or ceilings |
+| Logging | Timestamped planner messages in Node output |
+| Combat | `physicsTick` listener triggers `mineflayer-pvp`; planner briefly yields while fighting |
 | Eating | Delegated to `mineflayer-auto-eat` |
-| Navigation | `mineflayer-pathfinder` (A*) |
+| Navigation | `mineflayer-pathfinder` (A*) with short search budgets |
 
 The bot considers Milestone 1 complete when it has either a diamond pickaxe or a bucket (bucket-based Nether portal route).
 
@@ -77,12 +81,12 @@ From the project directory, run:
 npm start
 ```
 
-By default, the bot connects to `localhost:25565` as `MilestoneBot` using offline auth. Configure it with environment variables:
+By default, the bot connects to `localhost:25565` as `MinecraftBot` using offline auth. Configure it with environment variables:
 
 ```bash
 MINECRAFT_HOST=localhost \
 MINECRAFT_PORT=25565 \
-MINECRAFT_USERNAME=MilestoneBot \
+MINECRAFT_USERNAME=MinecraftBot \
 MINECRAFT_AUTH=offline \
 npm start
 ```
@@ -90,9 +94,10 @@ npm start
 Useful optional variables:
 
 * `MINECRAFT_VERSION`: pins the Minecraft protocol version when auto-detection is not enough.
-* `MILESTONE_AUTOSTART=false`: connects without starting the milestone routine.
+* `BOT_AUTOSTART=false`: connects without starting the milestone routine.
 * `COLLECTION_RADIUS=64`: changes the block and mob search radius.
-* `TARGET_LOGS`, `TARGET_COBBLESTONE`, `TARGET_RAW_IRON`, `TARGET_FOOD`: tune milestone resource targets.
+* `TARGET_LOGS`, `TARGET_COBBLESTONE`, `TARGET_RAW_IRON`, `TARGET_FOOD`: tune milestone resource targets. `TARGET_LOGS` now defaults to 3 starter logs for faster progression.
+* `PATHFINDER_TIMEOUT_MS`, `COLLECT_BLOCK_TIMEOUT_MS`, `COLLECT_BATCH_SIZE`, `CRAFTING_STEP_TIMEOUT_MS`, `DROP_PICKUP_RADIUS`, `DROP_PICKUP_TIMEOUT_MS`: tune how aggressively the planner skips slow targets.
 
 In-game chat commands:
 
