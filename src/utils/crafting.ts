@@ -1,19 +1,19 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
-import { Vec3 } from "vec3";
 import { logger } from "../logger.js";
-import { goToBlock, findBlock, sleep } from "./navigation.js";
+import { goToBlock, goToPosition, findBlock, sleep } from "./navigation.js";
 import { mineBlock } from "./mining.js";
+import { placeBlockFromInventory } from "./placement.js";
+import { countItem } from "./inventory.js";
 
 export async function ensureCraftingTable(bot: Bot): Promise<Block> {
-  const existing = findBlock(bot, "crafting_table", 32);
+  const existing = findBlock(bot, "crafting_table", 4);
   if (existing) {
     logger.debug("Found existing crafting table nearby");
     return existing;
   }
 
-  const tableItem = bot.inventory.items().find((i) => i.name === "crafting_table");
-  if (!tableItem) {
+  if (!bot.inventory.items().some((i) => i.name === "crafting_table")) {
     logger.info("Crafting a crafting table from planks");
     const planksItem = bot.inventory.items().find((i) => i.name.endsWith("_planks"));
     if (!planksItem || planksItem.count < 4) {
@@ -27,29 +27,7 @@ export async function ensureCraftingTable(bot: Bot): Promise<Block> {
     logger.info("Crafted crafting table");
   }
 
-  const tableInv = bot.inventory.items().find((i) => i.name === "crafting_table");
-  if (!tableInv) throw new Error("Failed to get crafting table in inventory");
-
-  const placePos = bot.entity.position.offset(1, -1, 0).floored();
-  const placeBlock = bot.blockAt(placePos);
-  if (!placeBlock || placeBlock.name === "air") {
-    const ground = bot.blockAt(bot.entity.position.offset(0, -1, 0).floored());
-    if (ground && ground.name !== "air") {
-      await bot.equip(tableInv, "hand");
-      await bot.placeBlock(ground, new Vec3(1, 0, 0));
-      logger.info("Placed crafting table");
-      const placed = findBlock(bot, "crafting_table", 5);
-      if (placed) return placed;
-    }
-  } else {
-    await bot.equip(tableInv, "hand");
-    await bot.placeBlock(placeBlock, new Vec3(0, 1, 0));
-    logger.info("Placed crafting table");
-    const placed = findBlock(bot, "crafting_table", 5);
-    if (placed) return placed;
-  }
-
-  throw new Error("Failed to place crafting table");
+  return placeBlockFromInventory(bot, "crafting_table");
 }
 
 export async function craftItem(
@@ -147,11 +125,24 @@ export async function pickupBlock(bot: Bot, blockName: string): Promise<void> {
   const block = findBlock(bot, blockName, 8);
   if (!block) return;
 
+  const before = countItem(bot, blockName);
+  const where = block.position.clone();
   try {
     await goToBlock(bot, block);
     await mineBlock(bot, block);
-    await sleep(300);
-    logger.debug(`Picked up ${blockName}`);
+
+    for (let i = 0; i < 8; i++) {
+      await sleep(300);
+      if (countItem(bot, blockName) > before) {
+        logger.debug(`Picked up ${blockName}`);
+        return;
+      }
+      try {
+        await goToPosition(bot, where, 0, 4000);
+      } catch {
+      }
+    }
+    logger.debug(`Mined ${blockName} but couldn't recover the drop`);
   } catch (err) {
     logger.debug(`Failed to pick up ${blockName}: ${err}`);
   }

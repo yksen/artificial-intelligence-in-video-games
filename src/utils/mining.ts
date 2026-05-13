@@ -2,8 +2,8 @@ import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import { logger } from "../logger.js";
 import { MINING } from "../config.js";
-import { findBlock, findBlocks, findBlockByNames, goToBlock, sleep, type Vec3Like } from "./navigation.js";
-import { hasPickaxeTier } from "./inventory.js";
+import { findBlock, findBlocks, findBlockByNames, goToBlock, sleep, ensureNotHalted, type Vec3Like } from "./navigation.js";
+import { hasPickaxeTier, freeInventory } from "./inventory.js";
 
 const IRON_PICKAXE_REQUIRED = new Set([
   "diamond_ore",
@@ -13,8 +13,13 @@ const IRON_PICKAXE_REQUIRED = new Set([
 ]);
 
 export async function mineBlock(bot: Bot, block: Block): Promise<void> {
+  ensureNotHalted(bot);
   if (IRON_PICKAXE_REQUIRED.has(block.name) && !hasPickaxeTier(bot, "iron")) {
     throw new Error(`Cannot mine ${block.name}: requires iron pickaxe or better`);
+  }
+
+  if (!bot.canDigBlock(block)) {
+    await goToBlock(bot, block);
   }
 
   try {
@@ -22,11 +27,91 @@ export async function mineBlock(bot: Bot, block: Block): Promise<void> {
   } catch {
   }
 
-  if (bot.entity.position.distanceTo(block.position) > 5) {
-    await goToBlock(bot, block);
+  if (!bot.canDigBlock(block)) {
+    throw new Error(`Cannot reach ${block.name} at ${block.position} to dig it`);
   }
 
-  await bot.dig(block);
+  await digWithRetry(bot, block);
+}
+
+async function digWithRetry(bot: Bot, block: Block, attempts = 3): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await bot.dig(block);
+      return;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/abort/i.test(msg) || i === attempts - 1) throw err;
+      const cur = bot.blockAt(block.position);
+      if (!cur || cur.name === "air") return;
+      logger.debug(`Dig of ${block.name} aborted (${msg}); retry ${i + 1}/${attempts - 1}`);
+      await sleep(300);
+      if (!bot.canDigBlock(cur)) {
+        try { await goToBlock(bot, cur); } catch { }
+        if (!bot.canDigBlock(cur)) throw new Error(`Cannot reach ${cur.name} to retry dig`);
+      }
+    }
+  }
+}
+
+async function collectBlocksByIds(
+  bot: Bot,
+  ids: number[],
+  label: string,
+  count: number,
+  maxDistance: number
+): Promise<number> {
+  if (ids.length === 0) {
+    logger.warn(`No known block ids for ${label}`);
+    return 0;
+  }
+
+  let mined = 0;
+  let stagnation = 0;
+
+  while (mined < count && stagnation < 3) {
+    ensureNotHalted(bot);
+    await freeInventory(bot);
+
+    const positions = bot.findBlocks({ matching: ids, maxDistance, count: count - mined });
+    if (positions.length === 0) {
+      logger.warn(`No more ${label} found within ${maxDistance} blocks`);
+      break;
+    }
+
+    const blocks = positions
+      .map((p) => bot.blockAt(p))
+      .filter((b): b is Block => b !== null);
+
+    const blocked = blocks.find((b) => IRON_PICKAXE_REQUIRED.has(b.name) && !hasPickaxeTier(bot, "iron"));
+    if (blocked) throw new Error(`Cannot mine ${blocked.name}: requires iron pickaxe or better`);
+
+    try {
+      await (bot as any).collectBlock.collect(blocks, { ignoreNoPath: true });
+    } catch (err) {
+      logger.debug(`collectBlock(${label}): ${err}`);
+    }
+
+    let brokeThisRound = 0;
+    for (const b of blocks) {
+      const cur = bot.blockAt(b.position);
+      if (!cur || cur.name === "air") brokeThisRound++;
+    }
+
+    if (brokeThisRound === 0) {
+      stagnation++;
+    } else {
+      stagnation = 0;
+      mined += brokeThisRound;
+      logger.debug(`Mined ${label} (${mined}/${count})`);
+    }
+    await sleep(150);
+  }
+
+  if (stagnation >= 3) {
+    logger.warn(`Could not reach any more ${label} (gave up after stagnating); mined ${mined}/${count}`);
+  }
+  return mined;
 }
 
 export async function findAndMineBlocks(
@@ -35,28 +120,13 @@ export async function findAndMineBlocks(
   count: number,
   maxDistance: number = MINING.maxSearchDistance
 ): Promise<number> {
-  let mined = 0;
-
-  while (mined < count) {
-    const block = findBlock(bot, blockName, maxDistance);
-    if (!block) {
-      logger.warn(`No more ${blockName} found within ${maxDistance} blocks`);
-      break;
-    }
-
-    try {
-      await goToBlock(bot, block);
-      await mineBlock(bot, block);
-      mined++;
-      logger.debug(`Mined ${blockName} (${mined}/${count})`);
-      await sleep(300);
-    } catch (err) {
-      logger.warn(`Failed to mine ${blockName}: ${err}`);
-      break;
-    }
+  const mcData = require("minecraft-data")(bot.version);
+  const id = mcData.blocksByName[blockName]?.id;
+  if (id === undefined) {
+    logger.warn(`Unknown block type: ${blockName}`);
+    return 0;
   }
-
-  return mined;
+  return collectBlocksByIds(bot, [id], blockName, count, maxDistance);
 }
 
 export async function findAndMineAnyBlock(
@@ -65,28 +135,11 @@ export async function findAndMineAnyBlock(
   count: number,
   maxDistance: number = MINING.maxSearchDistance
 ): Promise<number> {
-  let mined = 0;
-
-  while (mined < count) {
-    const block = findBlockByNames(bot, blockNames, maxDistance);
-    if (!block) {
-      logger.warn(`No more blocks of types [${blockNames.join(", ")}] found within ${maxDistance} blocks`);
-      break;
-    }
-
-    try {
-      await goToBlock(bot, block);
-      await mineBlock(bot, block);
-      mined++;
-      logger.debug(`Mined ${block.name} (${mined}/${count})`);
-      await sleep(300);
-    } catch (err) {
-      logger.warn(`Failed to mine ${block.name}: ${err}`);
-      break;
-    }
-  }
-
-  return mined;
+  const mcData = require("minecraft-data")(bot.version);
+  const ids = blockNames
+    .map((n) => mcData.blocksByName[n]?.id)
+    .filter((id: number | undefined): id is number => id !== undefined);
+  return collectBlocksByIds(bot, ids, blockNames.join("/"), count, maxDistance);
 }
 
 export async function digDownTo(bot: Bot, targetY: number): Promise<void> {

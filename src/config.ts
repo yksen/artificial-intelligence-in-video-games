@@ -15,10 +15,14 @@ export const RESOURCE_TARGETS = {
   logs: 10,
   cobblestone: 16,
   cookedFood: 8,
-  ironOre: 12,
-  ironIngots: 10,
+  ironOre: 17,
+  ironIngots: 17,
   diamonds: 3,
   obsidian: 10,
+  blazeRods: 7,
+  goldForBarter: 16,
+  enderPearls: 15,
+  eyesOfEnder: 15,
 } as const;
 
 export const MINING = {
@@ -34,7 +38,34 @@ export const NAVIGATION = {
   defaultRange: 2,
   interactRange: 4,
   maxDropDown: 4,
+  gotoTimeoutMs: 20_000,
 } as const;
+
+export const INVENTORY = {
+  minFreeSlots: 5,
+  targetFreeSlots: 8,
+} as const;
+
+export const JUNK_KEEP: Record<string, number> = {
+  dirt: 0,
+  coarse_dirt: 0,
+  grass_block: 0,
+  granite: 0,
+  diorite: 0,
+  andesite: 0,
+  tuff: 0,
+  sand: 0,
+  red_sand: 0,
+  gravel: 8,
+  cobblestone: 64,
+  netherrack: 0,
+  seeds: 0,
+  wheat_seeds: 0,
+  poppy: 0,
+  dandelion: 0,
+  rotten_flesh: 0,
+  kelp: 0,
+};
 
 export const LOG_BLOCKS = [
   "oak_log",

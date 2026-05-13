@@ -10,9 +10,6 @@ function toVec3(v: Vec3Like): Vec3 {
 
 export async function buildNetherPortal(bot: Bot, basePos: Vec3Like): Promise<void> {
   const base = toVec3(basePos);
-  const mcData = require("minecraft-data")(bot.version);
-  const obsidianId = mcData.itemsByName["obsidian"]?.id;
-  if (!obsidianId) throw new Error("Cannot find obsidian item ID");
 
   if (countItem(bot, "obsidian") < 10) {
     throw new Error(`Not enough obsidian: have ${countItem(bot, "obsidian")}, need 10`);
@@ -20,47 +17,52 @@ export async function buildNetherPortal(bot: Bot, basePos: Vec3Like): Promise<vo
 
   logger.info("Building nether portal frame");
 
-  const portalOffsets = [
-    [1, 0, 0], [2, 0, 0],
-    [0, 1, 0], [0, 2, 0], [0, 3, 0],
-    [3, 1, 0], [3, 2, 0], [3, 3, 0],
-    [1, 4, 0], [2, 4, 0],
-  ] as const;
+  const off = (dx: number, dy: number, dz: number) => base.offset(dx, dy, dz);
 
-  for (const [dx, dy, dz] of portalOffsets) {
-    const targetPos = base.offset(dx, dy, dz);
-    const block = bot.blockAt(targetPos);
+  const steps: Array<{ pos: Vec3; item: "obsidian" | "cobblestone" }> = [
+    { pos: off(0, 0, 0), item: "cobblestone" },
+    { pos: off(3, 0, 0), item: "cobblestone" },
+    { pos: off(1, 0, 0), item: "obsidian" },
+    { pos: off(2, 0, 0), item: "obsidian" },
+    { pos: off(0, 1, 0), item: "obsidian" },
+    { pos: off(0, 2, 0), item: "obsidian" },
+    { pos: off(0, 3, 0), item: "obsidian" },
+    { pos: off(3, 1, 0), item: "obsidian" },
+    { pos: off(3, 2, 0), item: "obsidian" },
+    { pos: off(3, 3, 0), item: "obsidian" },
+    { pos: off(0, 4, 0), item: "cobblestone" },
+    { pos: off(3, 4, 0), item: "cobblestone" },
+    { pos: off(1, 4, 0), item: "obsidian" },
+    { pos: off(2, 4, 0), item: "obsidian" },
+  ];
 
-    if (block && block.name === "obsidian") {
-      logger.debug(`Obsidian already at ${targetPos}`);
-      continue;
-    }
-
-    await goToPosition(bot, targetPos, 4);
-
-    const obsidianItem = bot.inventory.items().find((i) => i.name === "obsidian");
-    if (!obsidianItem) throw new Error("Ran out of obsidian during portal construction");
-    await bot.equip(obsidianItem, "hand");
-
-    const refBlock = findReferenceBlock(bot, targetPos);
-    if (!refBlock) {
-      logger.warn(`No reference block for placement at ${targetPos}, trying to scaffold`);
-      await placeScaffold(bot, targetPos);
-      const newRef = findReferenceBlock(bot, targetPos);
-      if (!newRef) throw new Error(`Cannot place obsidian at ${targetPos}: no reference block`);
-      await bot.equip(obsidianItem, "hand");
-      const face = targetPos.minus(newRef.position);
-      await bot.placeBlock(newRef, face);
-    } else {
-      const face = targetPos.minus(refBlock.position);
-      await bot.placeBlock(refBlock, face);
-    }
-
-    logger.debug(`Placed obsidian at ${targetPos}`);
-    await sleep(200);
+  for (const { pos, item } of steps) {
+    await placeFrameBlock(bot, pos, item);
   }
 
   logger.info("Nether portal frame complete");
+}
+
+async function placeFrameBlock(bot: Bot, targetPos: Vec3, itemName: "obsidian" | "cobblestone"): Promise<void> {
+  const existing = bot.blockAt(targetPos);
+  if (existing && (existing.name === itemName || existing.name === "obsidian")) {
+    logger.debug(`${existing.name} already at ${targetPos}`);
+    return;
+  }
+
+  await goToPosition(bot, targetPos, 4);
+
+  const item = bot.inventory.items().find((i) => i.name === itemName);
+  if (!item) throw new Error(`Ran out of ${itemName} during portal construction`);
+
+  const refBlock = findReferenceBlock(bot, targetPos);
+  if (!refBlock) throw new Error(`Cannot place ${itemName} at ${targetPos}: no reference block`);
+
+  await bot.equip(item, "hand");
+  const face = targetPos.minus(refBlock.position);
+  await bot.placeBlock(refBlock, new Vec3(face.x, face.y, face.z));
+  logger.debug(`Placed ${itemName} at ${targetPos}`);
+  await sleep(200);
 }
 
 function findReferenceBlock(bot: Bot, targetPos: Vec3Like) {
@@ -77,21 +79,6 @@ function findReferenceBlock(bot: Bot, targetPos: Vec3Like) {
     }
   }
   return null;
-}
-
-async function placeScaffold(bot: Bot, pos: Vec3Like): Promise<void> {
-  const scaffoldItem = bot.inventory.items().find(
-    (i) => i.name === "cobblestone" || i.name === "dirt" || i.name === "netherrack"
-  );
-  if (!scaffoldItem) return;
-
-  const ref = findReferenceBlock(bot, pos);
-  if (!ref) return;
-
-  await bot.equip(scaffoldItem, "hand");
-  const face = toVec3(pos).minus(ref.position);
-  await bot.placeBlock(ref, face);
-  await sleep(200);
 }
 
 export async function lightPortal(bot: Bot, basePos: Vec3Like): Promise<void> {

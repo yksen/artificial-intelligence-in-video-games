@@ -10,10 +10,14 @@ export interface Vec3Like {
   z: number;
 }
 
+export function ensureNotHalted(bot: Bot): void {
+  if ((bot as any).__halt) throw new Error("[bot] run halted (death/restart) — aborting stale phase");
+}
+
 export function configureMovements(bot: Bot): Movements {
   const movements = new Movements(bot);
   movements.canDig = true;
-  movements.allow1by1towers = false;
+  movements.allow1by1towers = true;
   movements.allowParkour = true;
   movements.allowSprinting = true;
   movements.maxDropDown = NAVIGATION.maxDropDown;
@@ -21,22 +25,47 @@ export function configureMovements(bot: Bot): Movements {
   return movements;
 }
 
-export async function goToBlock(bot: Bot, block: Block): Promise<void> {
-  const goal = new goals.GoalGetToBlock(block.position.x, block.position.y, block.position.z);
+async function gotoWithTimeout(bot: Bot, goal: any, timeoutMs: number = NAVIGATION.gotoTimeoutMs): Promise<void> {
   bot.pathfinder.setMovements(configureMovements(bot));
-  await bot.pathfinder.goto(goal);
+  const gotoP = bot.pathfinder.goto(goal);
+  gotoP.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      gotoP,
+      new Promise<never>((_, rej) => {
+        timer = setTimeout(() => rej(new Error(`pathfinder goto exceeded ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (bot.pathfinder.isMoving()) {
+      try { bot.pathfinder.setGoal(null); } catch { }
+    }
+  }
 }
 
-export async function goToPosition(bot: Bot, pos: Vec3Like, range: number = NAVIGATION.defaultRange): Promise<void> {
+export async function goToBlock(bot: Bot, block: Block): Promise<void> {
+  ensureNotHalted(bot);
+  const goal = new goals.GoalGetToBlock(block.position.x, block.position.y, block.position.z);
+  await gotoWithTimeout(bot, goal);
+}
+
+export async function goToPosition(
+  bot: Bot,
+  pos: Vec3Like,
+  range: number = NAVIGATION.defaultRange,
+  timeoutMs: number = NAVIGATION.gotoTimeoutMs,
+): Promise<void> {
+  ensureNotHalted(bot);
   const goal = new goals.GoalNear(pos.x, pos.y, pos.z, range);
-  bot.pathfinder.setMovements(configureMovements(bot));
-  await bot.pathfinder.goto(goal);
+  await gotoWithTimeout(bot, goal, timeoutMs);
 }
 
 export async function goToY(bot: Bot, y: number): Promise<void> {
+  ensureNotHalted(bot);
   const goal = new goals.GoalY(y);
-  bot.pathfinder.setMovements(configureMovements(bot));
-  await bot.pathfinder.goto(goal);
+  await gotoWithTimeout(bot, goal, NAVIGATION.gotoTimeoutMs * 2);
 }
 
 export function findBlock(bot: Bot, name: string, maxDistance: number = MINING.maxSearchDistance): Block | null {
