@@ -21,20 +21,9 @@ export const diamondMiningPhase: Phase = {
       throw new Error("No iron pickaxe or better available — cannot mine diamond ore");
     }
 
-    if (!hasItem(bot, "water_bucket")) {
-      const bucket = bot.inventory.items().find(
-        (i) => i.name === "bucket" || i.name === "water_bucket"
-      );
-      if (bucket && bucket.name === "bucket") {
-        const waterBlock = findBlock(bot, "water", 32);
-        if (waterBlock) {
-          const { goToBlock } = await import("../utils/navigation.js");
-          await goToBlock(bot, waterBlock);
-          await bot.equip(bucket, "hand");
-          await bot.activateBlock(waterBlock);
-          logger.info("Filled water bucket for lava safety");
-        }
-      }
+    if (!hasItem(bot, "water_bucket") && hasItem(bot, "bucket")) {
+      const { fillWaterBucket } = await import("../utils/fluids.js");
+      if (await fillWaterBucket(bot)) logger.info("Filled water bucket for lava safety");
     }
 
     const currentY = Math.floor(bot.entity.position.y);

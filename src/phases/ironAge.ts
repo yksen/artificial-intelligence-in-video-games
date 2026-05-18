@@ -12,11 +12,8 @@ export const ironAgePhase: Phase = {
   name: "Iron Age",
 
   canSkip(bot: Bot): boolean {
-    return (
-      hasPickaxeTier(bot, "iron") &&
-      hasItem(bot, "bucket") &&
-      hasItem(bot, "flint_and_steel")
-    );
+    const hasBucket = hasItem(bot, "bucket") || hasItem(bot, "water_bucket") || hasItem(bot, "lava_bucket");
+    return hasPickaxeTier(bot, "iron") && hasBucket;
   },
 
   async execute(bot: Bot): Promise<void> {
@@ -74,17 +71,28 @@ export const ironAgePhase: Phase = {
       logger.info("Crafted bucket");
     }
 
+    try {
+      const { craftAndEquipArmor } = await import("../utils/inventory.js");
+      await craftAndEquipArmor(bot, 1);
+    } catch (err) {
+      logger.debug(`Armor step skipped: ${err}`);
+    }
+
     if (!hasItem(bot, "flint")) {
       logger.info("Mining gravel for flint");
-      let flintAttempts = 0;
-      while (!hasItem(bot, "flint") && flintAttempts < 20) {
-        const mined = await findAndMineBlocks(bot, "gravel", 5);
-        if (mined === 0) break;
-        flintAttempts += 5;
+      let emptyRounds = 0;
+      let totalGravel = 0;
+      while (!hasItem(bot, "flint") && emptyRounds < 4 && totalGravel < 64) {
+        const mined = await findAndMineAnyBlock(bot, ["gravel"], 8, 40);
+        totalGravel += mined;
+        if (mined === 0) emptyRounds++;
+        else emptyRounds = 0;
         await sleep(200);
       }
       if (!hasItem(bot, "flint")) {
-        logger.warn("Could not obtain flint from gravel");
+        logger.warn(`Could not obtain flint from gravel (mined ${totalGravel} gravel)`);
+      } else {
+        logger.info("Obtained flint");
       }
     }
 
