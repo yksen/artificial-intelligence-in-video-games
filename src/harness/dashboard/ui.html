@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Speedrun Bot · Dashboard</title>
+    <style>
+      :root {
+        --bg: #0c0e12;
+        --bg-elev: #0f1217;
+        --line: #20262f;      /* separator lines */
+        --line-soft: #181d24; /* faint separators */
+        --border: #2a313c;    /* control outlines */
+        --text: #e7ebf1;
+        --muted: #8b95a5;
+        --faint: #5c6573;
+        --accent: #5b9dff;
+        --phase: #a371f7;
+        --ok: #3fb950;
+        --warn: #d6a319;
+        --err: #f0556d;
+        --cyan: #43c9d6;
+        --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+        --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font: 13px/1.5 var(--sans);
+        background: var(--bg);
+        color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
+      .mono { font-family: var(--mono); }
+
+      /* ---------- icons ---------- */
+      .ic { width: 15px; height: 15px; flex: 0 0 auto; vertical-align: -2px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .ic-fill { fill: currentColor; stroke: none; }
+
+      /* ---------- top bar ---------- */
+      .topbar {
+        display: flex; align-items: center; gap: 22px;
+        padding: 0 18px; height: 50px;
+        background: var(--bg);
+        border-bottom: 1px solid var(--line);
+        position: sticky; top: 0; z-index: 20;
+      }
+      .tabs { display: flex; gap: 2px; align-self: stretch; }
+      .tab-btn {
+        font: 600 13px var(--sans); color: var(--muted);
+        padding: 0 14px; border: none; background: none; cursor: pointer;
+        display: flex; align-items: center; gap: 8px; border-bottom: 2px solid transparent;
+      }
+      .tab-btn:hover { color: var(--text); }
+      .tab-btn.active { color: #fff; border-bottom-color: var(--accent); }
+      .spacer { flex: 1; }
+
+      /* ---------- views ---------- */
+      .view { display: none; }
+      .view.active { display: block; }
+
+      /* ---------- monitor ---------- */
+      .layout { display: grid; grid-template-columns: 340px 1fr; height: calc(100vh - 51px); }
+      .col { overflow: auto; padding: 0 16px 18px; border-right: 1px solid var(--line); }
+      .col:last-child { border-right: none; }
+      /* Breathing room under each section's content so it doesn't crowd the next separator line. */
+      .col > div { margin-bottom: 16px; }
+      h2 {
+        font: 600 10.5px var(--sans); text-transform: uppercase; letter-spacing: 0.1em; color: var(--faint);
+        margin: 0; padding: 14px 0 10px; border-top: 1px solid var(--line);
+        display: flex; align-items: center; justify-content: space-between; min-height: 20px;
+      }
+      .col > h2:first-of-type, #tab-tests h2:first-of-type { border-top: none; }
+      .kv { display: grid; grid-template-columns: 92px 1fr; gap: 7px 10px; padding-bottom: 4px; }
+      .kv .k { color: var(--faint); }
+      .kv .v { color: var(--text); word-break: break-word; font-family: var(--mono); font-size: 12px; }
+      .banner { display: none; padding: 11px 12px; margin: 14px 0; border-left: 3px solid var(--err); background: var(--bg-elev); }
+      .banner.show { display: block; }
+      .banner .h { color: var(--err); font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 7px; }
+      .banner .hint { color: #ffd7d5; margin: 4px 0; }
+      .banner pre { margin: 6px 0 0; white-space: pre-wrap; color: var(--muted); max-height: 160px; overflow: auto; font-family: var(--mono); }
+      .banner .x { float: right; cursor: pointer; color: var(--muted); display: inline-flex; }
+      .controls { display: flex; flex-wrap: wrap; gap: 7px; padding-bottom: 4px; }
+      button {
+        font: 600 11.5px var(--sans); cursor: pointer; padding: 3px 8px; border-radius: 5px;
+        border: 1px solid var(--border); background: transparent; color: var(--text);
+        display: inline-flex; align-items: center; gap: 5px; transition: 0.13s; line-height: 1.4;
+      }
+      button .ic { width: 13px; height: 13px; }
+      button:hover { border-color: var(--accent); color: #fff; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #08101e; }
+      button.primary:hover { filter: brightness(1.08); color: #08101e; }
+      button.danger:hover { border-color: var(--err); color: var(--err); }
+      button.icon-btn { padding: 3px 5px; color: var(--muted); }
+      button:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+      .run-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 2px; }
+      .timeline { padding-bottom: 6px; }
+      .timeline .row { display: flex; justify-content: space-between; padding: 5px 0 5px 9px; border-left: 2px solid var(--phase); margin: 4px 0; }
+      .timeline .row.done { border-left-color: var(--ok); }
+      .timeline .row.fail { border-left-color: var(--err); }
+      .timeline .dur { color: var(--faint); font-family: var(--mono); }
+      .timeline .dur.live { color: var(--phase); }
+      .feed { font-family: var(--mono); font-size: 12px; padding-bottom: 8px; }
+      .feed .e { display: flex; gap: 10px; padding: 3px 0; border-bottom: 1px solid var(--line-soft); }
+      .feed .t { color: var(--faint); flex: 0 0 auto; white-space: nowrap; }
+      .feed .ty { flex: 0 0 80px; color: var(--muted); }
+      .feed .m { flex: 1; white-space: pre-wrap; word-break: break-word; }
+      .e.err .m, .e.failure .m, .e.stuck .m { color: var(--err); }
+      .e.warn .m { color: var(--warn); }
+      .e.phase .m { color: var(--phase); }
+      .e.op .m { color: var(--accent); }
+      .e.checkpoint .m { color: var(--ok); }
+      .filters { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 9px; color: var(--muted); font-size: 11.5px; }
+      .filters label { cursor: pointer; user-select: none; }
+      iframe { width: 100%; height: 320px; border: none; background: #000; display: block; }
+      #viewer { border: 1px solid var(--line); height: auto; aspect-ratio: 16 / 9; }
+      .h2-actions { display: flex; align-items: center; gap: 10px; }
+      .small { color: var(--muted); font-size: 11px; }
+
+      /* ---------- tests ---------- */
+      #tab-tests { padding: 14px 18px 24px; height: calc(100vh - 51px); overflow: auto; }
+      .tests-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+      .tests-bar .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-left: auto; }
+      .lg { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+      .lg b { color: var(--text); font-family: var(--mono); }
+      .note { color: var(--faint); font-size: 11.5px; }
+      /* Two-column grid so two running tests (and their 3D views) sit side by side. The left column
+         gets a vertical divider; collapses to a single column on narrow screens. */
+      .test-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .trow { border-top: 1px solid var(--line); padding: 12px 0; }
+      .trow:nth-child(odd) { border-right: 1px solid var(--line); padding-right: 18px; }
+      .trow:nth-child(even) { padding-left: 18px; }
+      .trow:first-child, .trow:nth-child(2) { border-top: none; }
+      @media (max-width: 900px) {
+        .test-list { grid-template-columns: 1fr; }
+        .trow, .trow:nth-child(odd), .trow:nth-child(even) { border-right: none; padding: 12px 2px; }
+        .trow:nth-child(2) { border-top: 1px solid var(--line); }
+      }
+      .trow-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .tname { font-family: var(--mono); font-weight: 600; color: #fff; font-size: 13px; }
+      .tstatus { font: 600 10px var(--sans); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+      .tstatus .sd { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+      .st-idle { color: var(--faint); }
+      .st-queued { color: var(--cyan); }
+      .st-booting, .st-setup { color: var(--warn); }
+      .st-running { color: var(--accent); }
+      .st-running .sd { animation: pulse 1.1s infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+      .st-pass { color: var(--ok); }
+      .st-fail, .st-error, .st-timeout { color: var(--err); }
+      .st-stopped { color: var(--muted); }
+      .tdur { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+      .grow { flex: 1; }
+      .ext { color: var(--accent); font-size: 11.5px; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+      .ext:hover { text-decoration: underline; }
+      .tviewer { display: none; margin-top: 11px; background: #000; }
+      .tviewer.show { display: block; }
+      .tviewer iframe { width: 100%; height: auto; aspect-ratio: 16 / 9; }
+      .terr { margin-top: 8px; color: var(--err); font-size: 11px; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 60px; overflow: auto; }
+      .tlog { margin: 11px 0 0; padding: 9px 11px; background: var(--bg-elev); border-left: 2px solid var(--line); color: var(--muted); font: 11px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 130px; overflow: auto; display: none; }
+      .tlog.show { display: block; }
+      .empty { color: var(--faint); text-align: center; padding: 60px 0; }
+    </style>
+  </head>
+  <body>
+    <!-- inline SVG icon sprite -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="i-cube" viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.3 7 12 12l8.7-5"/><path d="M12 22V12"/></symbol>
+      <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></symbol>
+      <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9 2h6"/><path d="M10 2v6.5L4.5 18a1 1 0 0 0 .9 1.5h13.2a1 1 0 0 0 .9-1.5L14 8.5V2"/><path d="M7.5 14h9"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><path d="M7 4h3v16H7zM14 4h3v16h-3z"/></symbol>
+      <symbol id="i-heart" viewBox="0 0 24 24"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/></symbol>
+      <symbol id="i-food" viewBox="0 0 24 24"><path d="M15.45 15.4c-2.13.65-4.3.32-5.7-1.1-2.29-2.27-1.76-6.5 1.17-9.42 2.93-2.93 7.15-3.46 9.43-1.17 1.41 1.41 1.74 3.57 1.1 5.71-1.4-.51-3.26-.02-4.64 1.36-1.38 1.38-1.87 3.23-1.36 4.62z"/><path d="M11.25 15.6 9.1 17.8a2.5 2.5 0 1 1-4.56 1.73 2.49 2.49 0 0 1-1.41-4.24 2.5 2.5 0 0 1 3.14-.32"/></symbol>
+      <symbol id="i-dim" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></symbol>
+      <symbol id="i-camera" viewBox="0 0 24 24"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></symbol>
+      <symbol id="i-skip-back" viewBox="0 0 24 24"><path d="M18 20 8 12l10-8z"/><path d="M5 19V5"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></symbol>
+      <symbol id="i-server" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/></symbol>
+      <symbol id="i-external" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+      <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    </svg>
+
+    <div class="topbar">
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="tab-monitor" onclick="showTab('tab-monitor')"><svg class="ic"><use href="#i-activity" /></svg> Monitor</button>
+        <button class="tab-btn" data-tab="tab-tests" onclick="showTab('tab-tests')"><svg class="ic"><use href="#i-flask" /></svg> Tests</button>
+      </nav>
+      <div class="spacer"></div>
+    </div>
+
+    <!-- ============================== MONITOR ============================== -->
+    <section id="tab-monitor" class="view active">
+      <div class="layout">
+        <!-- LEFT: state + controls + timeline -->
+        <div class="col">
+          <div id="banner" class="banner">
+            <span class="x" onclick="document.getElementById('banner').classList.remove('show')"><svg class="ic"><use href="#i-x" /></svg></span>
+            <div class="h"><svg class="ic"><use href="#i-alert" /></svg><span id="bannerH">STUCK</span></div>
+            <div class="hint" id="bannerHint"></div>
+            <pre id="bannerDetail"></pre>
+          </div>
+
+          <h2 id="runCtlHead" style="display:none">Run</h2>
+          <div id="runCtl" style="display:none">
+            <div class="run-row">
+              <span class="tstatus st-idle" id="runStateBadge"><span class="sd"></span>idle</span>
+              <button class="primary" id="runBtn" onclick="toggleRun()"><svg class="ic ic-fill"><use href="#i-play" /></svg> Start run</button>
+            </div>
+          </div>
+
+          <h2>Live state</h2>
+          <div class="kv">
+            <span class="k">activity</span><span class="v" id="sActivity">—</span>
+            <span class="k">pos</span><span class="v" id="sPos">—</span>
+            <span class="k">dimension</span><span class="v" id="sDim">—</span>
+            <span class="k">health</span><span class="v" id="sHealth">—</span>
+            <span class="k">food</span><span class="v" id="sFood">—</span>
+            <span class="k">path goal</span><span class="v" id="sGoal">—</span>
+            <span class="k">hostiles</span><span class="v" id="sHostiles">—</span>
+            <span class="k">inv slots</span><span class="v" id="sSlots">—</span>
+          </div>
+
+          <h2>Inventory</h2>
+          <div class="v mono" id="sInv" style="font-size:12px;color:var(--muted);padding-bottom:4px">—</div>
+
+          <h2>Controls</h2>
+          <div class="controls">
+            <button class="run-only" onclick="ctl('checkpoint',{label:prompt('Checkpoint label','manual')||'manual'})"><svg class="ic"><use href="#i-camera" /></svg> Checkpoint</button>
+            <button class="run-only" onclick="ctl('restoreLast',{})"><svg class="ic"><use href="#i-skip-back" /></svg> Restore last</button>
+            <button class="run-only" onclick="ctl('restartBot',{})"><svg class="ic"><use href="#i-refresh" /></svg> Restart bot</button>
+            <button class="run-only danger" onclick="ctl('restartServer',{})"><svg class="ic"><use href="#i-server" /></svg> Restart server</button>
+            <button class="run-only" id="pauseBtn" onclick="togglePause()"><svg class="ic ic-fill"><use href="#i-pause" /></svg> Pause</button>
+          </div>
+
+          <h2>Phase timeline</h2>
+          <div class="timeline" id="timeline"></div>
+        </div>
+
+        <!-- CENTER: 3D viewer + event feed -->
+        <div class="col">
+          <h2>3D view
+            <span class="h2-actions">
+              <button id="followBtn" title="spectate 1st / 3rd person" onclick="toggleFollow()"><svg class="ic"><use href="#i-eye" /></svg> 3rd person</button>
+              <a id="viewerExt" class="ext" target="_blank" rel="noopener" title="open 3D view in new tab" style="display:none"><svg class="ic"><use href="#i-external" /></svg></a>
+            </span>
+          </h2>
+          <iframe id="viewer" title="viewer"></iframe>
+
+          <h2>Event feed</h2>
+          <div class="filters" id="filters"></div>
+          <div class="feed" id="feed"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== TESTS ============================== -->
+    <section id="tab-tests" class="view">
+      <div class="tests-bar">
+        <button class="primary" onclick="testRunAll()"><svg class="ic ic-fill"><use href="#i-play" /></svg> Run all</button>
+        <button class="danger" onclick="testStopAll()"><svg class="ic ic-fill"><use href="#i-stop" /></svg> Stop all</button>
+        <div class="legend">
+          <span class="lg"><b id="lgPass" style="color:var(--ok)">0</b> pass</span>
+          <span class="lg"><b id="lgFail" style="color:var(--err)">0</b> fail</span>
+          <span class="lg"><b id="lgRun" style="color:var(--accent)">0</b> running</span>
+          <span class="lg"><b id="lgIdle">0</b> idle</span>
+        </div>
+      </div>
+      <div class="test-list" id="testGrid"></div>
+      <div class="empty" id="testEmpty">No scenarios registered (or this dashboard has no test runner attached).</div>
+    </section>
+
+    <script>
+      // ---------- icon helper for dynamically-built markup ----------
+      const ICON = (n, fill) => `<svg class="ic${fill ? " ic-fill" : ""}" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+
+      // ---------- shared rendering ----------
+      const $ = (id) => document.getElementById(id);
+      const FEED_MAX = 1500;
+      let phases = [];
+      let feedFilters = { state: false, op: true, mc: true, log: true, phase: true, "stuck/fail": true, server: true, checkpoint: true, supervisor: true, control: true };
+
+      function showTab(id) {
+        document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === id));
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === id));
+      }
+
+      function buildFilters() {
+        const f = $("filters");
+        f.innerHTML = "";
+        for (const key of Object.keys(feedFilters)) {
+          const id = "flt_" + key;
+          const lab = document.createElement("label");
+          lab.innerHTML = `<input type="checkbox" id="${id}" ${feedFilters[key] ? "checked" : ""}> ${key}`;
+          lab.querySelector("input").addEventListener("change", (e) => { feedFilters[key] = e.target.checked; });
+          f.appendChild(lab);
+        }
+      }
+
+      function clsFor(e) {
+        if (e.type === "stuck" || e.type === "failure") return "stuck";
+        if (e.type === "op:start" || e.type === "op:end") return "op" + (e.data?.outcome === "timeout" ? " warn" : "");
+        if (e.type === "phase") return "phase";
+        if (e.type === "checkpoint") return "checkpoint";
+        if (e.type === "log") { const l = (e.data?.level || "").toUpperCase(); return l === "ERROR" ? "err" : l === "WARN" ? "warn" : ""; }
+        return "";
+      }
+      function filterKey(e) {
+        if (e.type === "state") return "state";
+        if (e.type === "op:start" || e.type === "op:end") return "op";
+        if (e.type === "mc") return "mc";
+        if (e.type === "log") return "log";
+        if (e.type === "phase") return "phase";
+        if (e.type === "stuck" || e.type === "failure") return "stuck/fail";
+        if (e.type === "checkpoint") return "checkpoint";
+        if (e.type === "supervisor") return "supervisor";
+        if (e.type === "control") return "control";
+        return "server";
+      }
+      function summarize(e) {
+        const d = e.data || {};
+        switch (e.type) {
+          case "log": return `[${d.level}] ${d.message}`;
+          case "op:start": return `> ${d.op} ${fmtArgs(d.args)}`;
+          case "op:end": return `${d.outcome === "ok" ? "ok" : d.outcome === "timeout" ? "timeout" : "fail"} ${d.op} (${d.durationMs}ms)${d.error ? " — " + d.error : ""}`;
+          case "mc": return `mc:${d.event} ${fmtArgs(d, ["event"])}`;
+          case "phase": return `phase ${d.action}: ${d.phase}${d.index != null ? ` (${d.index + 1}/${d.total})` : ""}`;
+          case "stuck": return `STUCK [${d.source}] ${d.hint || ""}`;
+          case "failure": return `FAILURE ${d.reason} -> ${d.file || ""}`;
+          case "checkpoint": return `checkpoint ${d.action}: ${d.label || ""}`;
+          case "server": return d.message || JSON.stringify(d);
+          case "supervisor": return d.message || JSON.stringify(d);
+          case "control": return `control ${d.cmd} ${fmtArgs(d.args || {})}`;
+          case "state": return `pos ${d.pos ? `${r(d.pos.x)},${r(d.pos.y)},${r(d.pos.z)}` : "?"} hp ${d.health} food ${d.food} act:${d.activity || "-"}`;
+          default: return JSON.stringify(d);
+        }
+      }
+      const r = (n) => Math.round(n);
+      function fmtArgs(o, skip = []) {
+        if (!o) return "";
+        return Object.entries(o).filter(([k]) => !skip.includes(k)).map(([k, v]) => `${k}=${fmtVal(v)}`).join(" ");
+      }
+      function fmtVal(v) {
+        if (v && typeof v === "object") { if (typeof v.x === "number") return `(${r(v.x)},${r(v.y)},${r(v.z)})`; return JSON.stringify(v); }
+        return String(v);
+      }
+
+      function addFeed(e) {
+        if (!feedFilters[filterKey(e)]) return;
+        const feed = $("feed");
+        const div = document.createElement("div");
+        div.className = "e " + clsFor(e);
+        const time = new Date(e.t).toLocaleTimeString();
+        div.innerHTML = `<span class="t">${time}</span><span class="ty">${e.type}</span><span class="m"></span>`;
+        div.querySelector(".m").textContent = summarize(e);
+        const atTop = feed.scrollTop <= 30;
+        feed.insertBefore(div, feed.firstChild);
+        while (feed.childElementCount > FEED_MAX) feed.removeChild(feed.lastChild);
+        if (atTop) feed.scrollTop = 0;
+      }
+
+      function applyState(d) {
+        $("sActivity").textContent = d.activity ? `${d.activity}${d.activityElapsedMs != null ? ` (${(d.activityElapsedMs/1000).toFixed(1)}s)` : ""}` : "idle";
+        $("sPos").textContent = d.pos ? `${r(d.pos.x)}, ${r(d.pos.y)}, ${r(d.pos.z)}` : "—";
+        $("sDim").textContent = d.dimension || "—";
+        $("sHealth").textContent = d.health ?? "—";
+        $("sFood").textContent = d.food ?? "—";
+        $("sGoal").textContent = d.pathGoal || "—";
+        $("sHostiles").textContent = d.nearbyHostiles ?? "—";
+        $("sSlots").textContent = (d.inventoryUsedSlots ?? "—") + " / 36";
+        $("sInv").textContent = (d.inventory && d.inventory.length) ? d.inventory.map((i) => `${i.name}×${i.count}`).join(", ") : "empty";
+      }
+
+      function applyPhase(d) {
+        if (d.action === "start") {
+          phases.push({ name: d.phase, start: Date.now(), status: "running" });
+        } else {
+          const p = [...phases].reverse().find((x) => x.name === d.phase && x.status === "running");
+          if (p) { p.status = d.action === "complete" ? "done" : "fail"; p.end = Date.now(); }
+        }
+        renderTimeline();
+      }
+      function renderTimeline() {
+        const now = Date.now();
+        $("timeline").innerHTML = phases.map((p) => {
+          const ms = (p.end ?? now) - p.start;
+          const dur = (ms / 1000).toFixed(0) + "s";
+          const cls = p.status === "done" ? "done" : p.status === "fail" ? "fail" : "";
+          const live = p.status === "running" ? " live" : "";
+          return `<div class="row ${cls}"><span>${p.name}</span><span class="dur${live}">${dur}</span></div>`;
+        }).join("");
+      }
+      // Tick the running phase's elapsed counter once per second.
+      setInterval(() => { if (phases.some((p) => p.status === "running")) renderTimeline(); }, 1000);
+
+      function showBanner(d) {
+        $("bannerH").textContent = d.source === "op-timeout" ? "OP TIMEOUT" : "STUCK";
+        $("bannerHint").textContent = d.hint || d.op || "";
+        $("bannerDetail").textContent = JSON.stringify(d, null, 1);
+        $("banner").classList.add("show");
+      }
+
+      function dispatch(e) {
+        if (e.type === "state") applyState(e.data);
+        else if (e.type === "phase") applyPhase(e.data);
+        else if (e.type === "stuck") showBanner(e.data);
+        addFeed(e);
+      }
+
+      // ---------- tests app ----------
+      const tests = new Map();      // name -> state
+      const testLogs = {};          // name -> string[]
+      const TLOG_MAX = 200;
+      const ACTIVE = ["queued", "booting", "setup", "running"];
+
+      function seedTests(list, parallel) {
+        tests.clear();
+        for (const t of list || []) tests.set(t.name, t);
+        $("testEmpty").style.display = tests.size ? "none" : "block";
+        renderTests();
+      }
+
+      function renderTests() {
+        const grid = $("testGrid");
+        grid.innerHTML = "";
+        for (const t of tests.values()) grid.appendChild(buildRow(t));
+        renderCounts();
+      }
+
+      const statusLabel = (s) => s;
+
+      function buildRow(t) {
+        const active = ACTIVE.includes(t.status);
+        const el = document.createElement("div");
+        el.className = "trow st-row-" + t.status;
+        el.dataset.name = t.name;
+        const dur = t.durationMs != null ? (t.durationMs / 1000).toFixed(1) + "s" : active && t.startedAt ? "…" : "";
+        const showViewer = !!t.viewerPort && active;
+        const viewerSrc = t.viewerPort ? `http://${location.hostname}:${t.viewerPort}` : "";
+        const logs = (testLogs[t.name] || []);
+        el.innerHTML = `
+          <div class="trow-head">
+            <span class="tname">${t.name}</span>
+            <span class="tstatus st-${t.status}"><span class="sd"></span>${statusLabel(t.status)}</span>
+            ${dur ? `<span class="tdur">${dur}</span>` : ""}
+            <span class="grow"></span>
+            ${showViewer ? `<button class="icon-btn" title="spectate 1st / 3rd person" onclick="testViewer('${t.name}', ${t.viewerFirstPerson ? "false" : "true"})">${ICON("eye")} ${t.viewerFirstPerson ? "1st" : "3rd"}</button>` : ""}
+            ${active
+              ? `<button class="danger" onclick="testStop('${t.name}')">${ICON("stop", true)} Stop</button>`
+              : `<button class="primary" onclick="testRun('${t.name}')">${ICON("play", true)} Run</button>`}
+            <button class="icon-btn" title="toggle log" onclick="toggleLog('${t.name}')">${ICON("terminal")}</button>
+            ${showViewer ? `<a class="ext" href="${viewerSrc}" target="_blank" rel="noopener" title="open 3D view in new tab">${ICON("external")}</a>` : ""}
+          </div>
+          <div class="tviewer ${showViewer ? "show" : ""}">${showViewer ? `<iframe src="${viewerSrc}" title="${t.name} view"></iframe>` : ""}</div>
+          ${t.error ? `<div class="terr">${t.error}</div>` : ""}
+          <pre class="tlog" id="tlog-${cssId(t.name)}">${logs.slice(-TLOG_MAX).join("\n")}</pre>`;
+        return el;
+      }
+
+      const cssId = (s) => s.replace(/[^a-z0-9_-]/gi, "_");
+
+      function upsertCard(t) {
+        tests.set(t.name, t);
+        const grid = $("testGrid");
+        const existing = grid.querySelector(`.trow[data-name="${cssEsc(t.name)}"]`);
+        const fresh = buildRow(t);
+        const wasOpen = existing && existing.querySelector(".tlog")?.classList.contains("show");
+        if (wasOpen) fresh.querySelector(".tlog")?.classList.add("show");
+        if (existing) grid.replaceChild(fresh, existing);
+        else grid.appendChild(fresh);
+        renderCounts();
+      }
+
+      const cssEsc = (s) => (window.CSS && CSS.escape ? CSS.escape(s) : s);
+
+      function renderCounts() {
+        let pass = 0, fail = 0, run = 0, idle = 0;
+        for (const t of tests.values()) {
+          if (t.status === "pass") pass++;
+          else if (["fail", "error", "timeout"].includes(t.status)) fail++;
+          else if (ACTIVE.includes(t.status)) run++;
+          else idle++;
+        }
+        $("lgPass").textContent = pass; $("lgFail").textContent = fail; $("lgRun").textContent = run; $("lgIdle").textContent = idle;
+      }
+
+      function appendTestLog(name, line) {
+        (testLogs[name] = testLogs[name] || []).push(line);
+        if (testLogs[name].length > TLOG_MAX) testLogs[name].shift();
+        const pre = $("tlog-" + cssId(name));
+        if (pre) {
+          const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
+          pre.textContent = testLogs[name].join("\n");
+          if (atBottom) pre.scrollTop = pre.scrollHeight;
+        }
+      }
+
+      function toggleLog(name) {
+        const pre = $("tlog-" + cssId(name));
+        if (pre) { pre.classList.toggle("show"); pre.scrollTop = pre.scrollHeight; }
+      }
+
+      function testRun(name) { ws?.send(JSON.stringify({ kind: "test", cmd: "run", args: { name } })); }
+      function testStop(name) { ws?.send(JSON.stringify({ kind: "test", cmd: "stop", args: { name } })); }
+      function testViewer(name, firstPerson) { ws?.send(JSON.stringify({ kind: "test", cmd: "viewer", args: { name, firstPerson } })); }
+      function testRunAll() { ws?.send(JSON.stringify({ kind: "test", cmd: "runAll" })); }
+      function testStopAll() { ws?.send(JSON.stringify({ kind: "test", cmd: "stopAll" })); }
+
+      // ---------- live websocket ----------
+      let ws, paused = false;
+      function connect() {
+        ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onclose = () => { setTimeout(connect, 1500); };
+        ws.onmessage = (m) => {
+          const msg = JSON.parse(m.data);
+          if (msg.kind === "hello") {
+            if (msg.viewerEnabled) {
+              const viewerUrl = `http://${location.hostname}:${msg.viewerPort}`;
+              $("viewer").src = viewerUrl;
+              const ext = $("viewerExt");
+              ext.href = viewerUrl;
+              ext.style.display = "";
+            }
+            hasRun = !!msg.hasRun;
+            $("runCtl").style.display = hasRun ? "" : "none";
+            $("runCtlHead").style.display = hasRun ? "" : "none";
+            applyRunState(msg.runState || "idle");
+            if (msg.hasTests) seedTests(msg.tests, msg.testParallel);
+            (msg.history || []).forEach((e) => dispatch(e));
+          } else if (msg.kind === "run-state") {
+            applyRunState(msg.state);
+          } else if (msg.kind === "event") {
+            dispatch(msg.event);
+          } else if (msg.kind === "test-update") {
+            upsertCard(msg.test);
+            $("testEmpty").style.display = tests.size ? "none" : "block";
+          } else if (msg.kind === "test-log") {
+            appendTestLog(msg.name, msg.line);
+          } else if (msg.kind === "test-ack") {
+            if (!msg.ok) console.warn("test", msg.cmd, msg.error);
+          } else if (msg.kind === "control-ack") {
+            console.log("control", msg.cmd, msg.ok ? "ok" : "FAIL", msg.error || "");
+            if (msg.cmd === "viewerFollow") {
+              if (msg.ok) {
+                const f = $("viewer");
+                const src = f.src;
+                setTimeout(() => { f.src = src; }, 1000);
+              } else {
+                follow = !follow;
+                $("followBtn").innerHTML = `${ICON("eye")} ${follow ? "1st person" : "3rd person"}`;
+              }
+            }
+          }
+        };
+      }
+      function ctl(cmd, args) { ws?.send(JSON.stringify({ kind: "control", cmd, args })); }
+
+      // ---------- run lifecycle (Monitor) ----------
+      let hasRun = false, runState = "idle";
+      function applyRunState(state) {
+        runState = state;
+        const badge = $("runStateBadge");
+        badge.className = "tstatus st-" + (state === "running" ? "running" : state === "starting" || state === "stopping" ? "booting" : "idle");
+        badge.innerHTML = `<span class="sd"></span>${state}`;
+        const btn = $("runBtn");
+        const busy = state === "starting" || state === "stopping";
+        const active = state === "running";
+        btn.disabled = busy;
+        btn.className = active ? "danger" : "primary";
+        btn.innerHTML = busy
+          ? `${ICON("clock")} ${state === "starting" ? "Starting…" : "Stopping…"}`
+          : active ? `${ICON("stop", true)} Stop run` : `${ICON("play", true)} Start run`;
+        document.querySelectorAll(".run-only").forEach((b) => { b.disabled = !active; });
+      }
+      function toggleRun() {
+        if (runState === "running") ctl("stopRun", {});
+        else if (runState === "idle") ctl("startRun", {});
+      }
+      let follow = false;
+      function toggleFollow() {
+        follow = !follow;
+        $("followBtn").innerHTML = `${ICON("eye")} ${follow ? "1st person" : "3rd person"}`;
+        ctl("viewerFollow", { on: follow });
+      }
+      function togglePause() {
+        paused = !paused;
+        ctl(paused ? "pause" : "resume", {});
+        $("pauseBtn").innerHTML = paused ? `${ICON("play", true)} Resume` : `${ICON("pause", true)} Pause`;
+      }
+
+      // ---------- boot ----------
+      buildFilters();
+      connect();
+    </script>
+  </body>
+</html>

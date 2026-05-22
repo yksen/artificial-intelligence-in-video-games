@@ -3,14 +3,25 @@ import { join } from "path";
 
 export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
 
+export type LogSink = (level: LogLevel, message: string) => void;
+
 export class Logger {
   private logFilePath: string;
+  private sinks: LogSink[] = [];
 
   constructor() {
     const logsDir = join(import.meta.dir, "..", "logs");
     mkdirSync(logsDir, { recursive: true });
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     this.logFilePath = join(logsDir, `run-${timestamp}.log`);
+  }
+
+  addSink(sink: LogSink): () => void {
+    this.sinks.push(sink);
+    return () => {
+      const i = this.sinks.indexOf(sink);
+      if (i >= 0) this.sinks.splice(i, 1);
+    };
   }
 
   private format(level: LogLevel, message: string): string {
@@ -36,6 +47,13 @@ export class Logger {
     try {
       appendFileSync(this.logFilePath, formatted + "\n");
     } catch {
+    }
+
+    for (const sink of this.sinks) {
+      try {
+        sink(level, message);
+      } catch {
+      }
     }
   }
 

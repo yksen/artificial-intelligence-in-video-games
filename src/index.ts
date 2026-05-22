@@ -1,22 +1,15 @@
 import { logger } from "./logger.js";
-import { MinecraftBot } from "./bot.js";
+import { Supervisor } from "./harness/supervisor.js";
+import { HARNESS } from "./harness/config.js";
 
-logger.info("=== Minecraft Bot Starting ===");
-logger.info(`Node/Bun version: ${process.version}`);
-logger.info(`Platform: ${process.platform}`);
+logger.info("=== Minecraft Speedrun Harness ===");
+logger.info(`Runtime: ${process.version} on ${process.platform}`);
+logger.info(`Server JVM: ${HARNESS.javaBin}`);
+logger.info(`Dashboard: http://localhost:${HARNESS.dashboardPort}  |  3D view: http://localhost:${HARNESS.viewerPort}`);
+logger.info(`Idle — start a run from the Monitor tab or run scenarios from the Tests tab.`);
 
-try {
-  new MinecraftBot();
-} catch (err) {
-  logger.error(`Failed to create bot: ${err}`);
+const supervisor = new Supervisor();
+supervisor.run().catch((err) => {
+  logger.error(`Supervisor crashed: ${err?.stack ?? err}`);
   process.exit(1);
-}
-
-process.on("uncaughtException", (err) => {
-  logger.error(`Uncaught exception: ${err.message}`);
-  logger.error(err.stack ?? "");
-});
-
-process.on("unhandledRejection", (reason) => {
-  logger.error(`Unhandled rejection: ${reason}`);
 });
