@@ -12,10 +12,13 @@ import { gatherFoodPhase } from "./phases/gatherFood.js";
 import { ironAgePhase } from "./phases/ironAge.js";
 import { diamondMiningPhase } from "./phases/diamondMining.js";
 import { netherPortalPhase } from "./phases/netherPortal.js";
-import { shouldEat, eatFood } from "./utils/survival.js";
+import { netherResourcesPhase } from "./phases/netherResources.js";
+import { eyesOfEnderPhase } from "./phases/eyesOfEnder.js";
+import { enterEndPhase } from "./phases/enterEnd.js";
+import { shouldEat, eatFood, isDrowning, escapeWater, isInLavaOrFire, escapeLavaOrFire } from "./utils/survival.js";
 import { shouldFlee, getNearbyHostiles, flee } from "./utils/combat.js";
 import { lootNearbyChests } from "./utils/environment.js";
-import { equipBestArmor } from "./utils/inventory.js";
+import { equipBestArmor, freeInventory } from "./utils/inventory.js";
 import { sleep, goToY } from "./utils/navigation.js";
 
 export class MinecraftBot {
@@ -26,6 +29,9 @@ export class MinecraftBot {
   private isSurvivalInterrupt: boolean = false;
   private spawnCount: number = 0;
   private runId: number = 0;
+  private disposed: boolean = false;
+  private phaseAttempts: Map<number, number> = new Map();
+  private readonly maxPhaseAttempts: number = 3;
 
   constructor() {
     logger.info("Creating bot...");
@@ -45,6 +51,9 @@ export class MinecraftBot {
       ironAgePhase,
       diamondMiningPhase,
       netherPortalPhase,
+      netherResourcesPhase,
+      eyesOfEnderPhase,
+      enterEndPhase,
     ];
 
     this.registerPlugins();
@@ -61,6 +70,7 @@ export class MinecraftBot {
 
   private registerEventHandlers(): void {
     this.bot.on("spawn", () => {
+      if (this.disposed) return;
       this.spawnCount++;
       if (this.spawnCount === 1) {
         logger.info("Bot spawned in the world");
@@ -77,6 +87,8 @@ export class MinecraftBot {
     this.bot.on("death", () => {
       logger.error("Bot died!");
       this.isRunning = false;
+      this.runId++;
+      (this.bot as any).__halt = true;
       try { this.bot.pathfinder.stop(); } catch {}
     });
 
@@ -102,6 +114,28 @@ export class MinecraftBot {
   private async handleSurvivalInterrupt(): Promise<void> {
     if (this.isSurvivalInterrupt) return;
 
+    if (isInLavaOrFire(this.bot)) {
+      this.isSurvivalInterrupt = true;
+      try {
+        await escapeLavaOrFire(this.bot);
+      } catch (err) {
+        logger.warn(`Failed to escape lava/fire: ${err}`);
+      }
+      this.isSurvivalInterrupt = false;
+      return;
+    }
+
+    if (isDrowning(this.bot)) {
+      this.isSurvivalInterrupt = true;
+      logger.warn(`Drowning interrupt: oxygen=${(this.bot as any).oxygenLevel ?? "?"}`);
+      try {
+        await escapeWater(this.bot);
+      } catch (err) {
+        logger.warn(`Failed to escape water: ${err}`);
+      }
+      this.isSurvivalInterrupt = false;
+    }
+
     if (shouldEat(this.bot)) {
       this.isSurvivalInterrupt = true;
       logger.info(`Hunger interrupt: food=${this.bot.food}/20`);
@@ -126,6 +160,7 @@ export class MinecraftBot {
   }
 
   private async onRespawn(): Promise<void> {
+    if (this.disposed) return;
     await sleep(3000);
 
     logger.info("Re-assessing inventory after respawn...");
@@ -154,6 +189,7 @@ export class MinecraftBot {
   }
 
   async start(): Promise<void> {
+    if (this.disposed) return;
     if (this.isRunning) {
       logger.warn("start() called while already running, ignoring");
       return;
@@ -161,11 +197,15 @@ export class MinecraftBot {
     this.isRunning = true;
     this.runId++;
     const myRunId = this.runId;
+    (this.bot as any).__halt = false;
 
     logger.info("=== Starting bot progression ===");
 
-    if ((this.bot.game as any).dimension === "the_nether") {
-      logger.info("Already in the Nether! Goal achieved.");
+    await this.waitForInventoryReady();
+    if (this.runId !== myRunId) return;
+
+    if ((this.bot.game as any).dimension === "the_end") {
+      logger.info("Already in the End! Goal achieved.");
       this.isRunning = false;
       return;
     }
@@ -212,6 +252,7 @@ export class MinecraftBot {
         await phase.execute(this.bot);
         if (this.runId !== myRunId) break;
         logger.info(`Phase "${phase.name}" completed successfully`);
+        this.phaseAttempts.delete(i);
       } catch (err) {
         if (this.runId !== myRunId) break;
         logger.error(`Phase "${phase.name}" failed: ${err}`);
@@ -223,10 +264,24 @@ export class MinecraftBot {
           await phase.execute(this.bot);
           if (this.runId !== myRunId) break;
           logger.info(`Phase "${phase.name}" succeeded on retry`);
+          this.phaseAttempts.delete(i);
         } catch (retryErr) {
           if (this.runId !== myRunId) break;
           logger.error(`Phase "${phase.name}" failed on retry: ${retryErr}`);
-          logger.error("Bot cannot progress further, will retry from beginning in 10s");
+
+          const attempts = (this.phaseAttempts.get(i) ?? 0) + 1;
+          this.phaseAttempts.set(i, attempts);
+          if (attempts >= this.maxPhaseAttempts) {
+            logger.error(
+              `Phase "${phase.name}" failed ${attempts}x — halting; supervisor/watchdog will take over`,
+            );
+            this.isRunning = false;
+            return;
+          }
+
+          logger.error(
+            `Bot cannot progress; retrying phase "${phase.name}" in 10s (attempt ${attempts}/${this.maxPhaseAttempts})`,
+          );
           this.isRunning = false;
           await sleep(10000);
           this.currentPhaseIndex = i;
@@ -236,6 +291,7 @@ export class MinecraftBot {
       }
 
       try {
+        await freeInventory(this.bot);
         if (shouldEat(this.bot)) await eatFood(this.bot);
         await equipBestArmor(this.bot);
       } catch {
@@ -246,12 +302,38 @@ export class MinecraftBot {
 
     if (this.isRunning) {
       logger.info("=== All phases completed! ===");
-      if ((this.bot.game as any).dimension === "the_nether") {
-        logger.info("=== GOAL ACHIEVED: Bot is in the Nether! ===");
+      const dim = (this.bot.game as any).dimension;
+      if (dim === "the_end") {
+        logger.info("=== GOAL ACHIEVED: Bot reached the End! ===");
+      } else if (dim === "the_nether") {
+        logger.info("=== Milestone: Bot is in the Nether ===");
       }
     }
 
     this.isRunning = false;
+  }
+
+  private async waitForInventoryReady(maxWaitMs: number = 3000): Promise<void> {
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      if (this.bot.inventory.items().length > 0) return;
+      await sleep(200);
+    }
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.isRunning = false;
+    this.runId++;
+    try {
+      (this.bot as any).pathfinder?.stop?.();
+    } catch {}
+    try {
+      this.bot.removeAllListeners();
+    } catch {}
+    try {
+      this.bot.quit("harness: retiring instance");
+    } catch {}
   }
 
   private logInventorySummary(): void {
