@@ -9,15 +9,34 @@ bun install
 bun start
 ```
 
-Connects to `localhost:25565` by default. Override with environment variables:
+`bun start` launches the **supervised harness** (see [docs/HARNESS.md](docs/HARNESS.md)): it boots
+the bundled Minecraft 1.16.1 server itself, runs the bot in-process with full instrumentation,
+serves a live dashboard + 3D view, records a replayable event stream, checkpoints the world, and
+auto-restarts on stalls/deaths/crashes. You do **not** need to start the server manually.
 
-| Variable       | Default     | Description      |
-| -------------- | ----------- | ---------------- |
-| `BOT_HOST`     | `localhost` | Server address   |
-| `BOT_PORT`     | `25565`     | Server port      |
-| `BOT_USERNAME` | `Bot`       | In-game username |
+- **Dashboard:** http://localhost:3008 — live state, phase timeline, event feed, a "why is it
+  stuck" banner, control buttons (checkpoint / restore / restart / pause), and replay of past runs.
+- **3D view:** http://localhost:3007 (prismarine-viewer).
+- **Run artifacts:** `runs/<runId>/` (events, telemetry, server log, checkpoints, diagnostics).
 
-The server must be running Minecraft 1.16.1 with `online-mode=false`.
+Other entry points:
+
+```bash
+bun run bot                 # instrument an already-running server (no lifecycle management)
+bun run replay              # print the newest run's event timeline
+bun run replay <runId>      # a specific run; add --stuck or --type=op:end,phase
+```
+
+Common env overrides (full list in [docs/HARNESS.md](docs/HARNESS.md)):
+
+| Variable        | Default                | Description                          |
+| --------------- | ---------------------- | ------------------------------------ |
+| `BOT_USERNAME`  | `Bot`                  | In-game username                     |
+| `JAVA_BIN`      | auto-detected Java 11  | JVM used to launch the 1.16.1 server |
+| `LEVEL_SEED`    | (world default)        | Pin a seed for reproducible runs     |
+| `FRESH_WORLD`   | `false`                | Wipe the world before booting        |
+| `DASHBOARD_PORT`| `3008`                 | Dashboard port                       |
+| `VIEWER_PORT`   | `3007`                 | prismarine-viewer port               |
 
 ## Architecture
 
