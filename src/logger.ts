@@ -5,7 +5,14 @@ export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
 
 export type LogSink = (level: LogLevel, message: string) => void;
 
-export class Logger {
+export interface LogWriter {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+  debug(message: string): void;
+}
+
+export class Logger implements LogWriter {
   private logFilePath: string;
   private sinks: LogSink[] = [];
 
@@ -71,6 +78,16 @@ export class Logger {
 
   debug(message: string): void {
     this.write("DEBUG", message);
+  }
+
+  scoped(prefix: string): LogWriter {
+    const tag = `[${prefix}] `;
+    return {
+      info: (m) => this.info(tag + m),
+      warn: (m) => this.warn(tag + m),
+      error: (m) => this.error(tag + m),
+      debug: (m) => this.debug(tag + m),
+    };
   }
 }
 

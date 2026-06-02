@@ -46,6 +46,11 @@ export const INVENTORY = {
   targetFreeSlots: 8,
 } as const;
 
+export const SMELT_DOWNTIME = {
+  enabled: true,
+  huntRadius: 24,
+} as const;
+
 export const JUNK_KEEP: Record<string, number> = {
   dirt: 0,
   coarse_dirt: 0,

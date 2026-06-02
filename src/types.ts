@@ -1,7 +1,7 @@
-import type { Bot } from "mineflayer";
+import type { PhaseContext } from "./runtime.js";
 
 export interface Phase {
   name: string;
-  canSkip(bot: Bot): boolean;
-  execute(bot: Bot): Promise<void>;
+  canSkip(ctx: PhaseContext): boolean;
+  execute(ctx: PhaseContext): Promise<void>;
 }
