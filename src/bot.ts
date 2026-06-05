@@ -6,6 +6,9 @@ import { plugin as tool } from "mineflayer-tool";
 import { logger } from "./logger.js";
 import { BOT_CONFIG } from "./config.js";
 import type { Phase } from "./types.js";
+import type { PhaseContext } from "./runtime.js";
+import { bindSession, loadMcData, beginReflex, endReflex } from "./runtime.js";
+import { botEvents } from "./events.js";
 import { gatherWoodPhase } from "./phases/gatherWood.js";
 import { stoneAgePhase } from "./phases/stoneAge.js";
 import { gatherFoodPhase } from "./phases/gatherFood.js";
@@ -21,17 +24,22 @@ import { lootNearbyChests } from "./utils/environment.js";
 import { equipBestArmor, freeInventory } from "./utils/inventory.js";
 import { sleep, goToY } from "./utils/navigation.js";
 
+type RunState = "idle" | "running" | "retrying" | "halted" | "done";
+
+const SURFACE_PHASE_CUTOFF = 4;
+
 export class MinecraftBot {
-  private bot: mineflayer.Bot;
-  private phases: Phase[];
-  private currentPhaseIndex: number = 0;
-  private isRunning: boolean = false;
-  private isSurvivalInterrupt: boolean = false;
-  private spawnCount: number = 0;
-  private runId: number = 0;
-  private disposed: boolean = false;
-  private phaseAttempts: Map<number, number> = new Map();
-  private readonly maxPhaseAttempts: number = 3;
+  private readonly bot: mineflayer.Bot;
+  private readonly phases: Phase[];
+  private readonly maxPhaseAttempts = 3;
+
+  private state: RunState = "idle";
+  private run: AbortController | null = null;
+  private spawnCount = 0;
+  private disposed = false;
+  private reflexBusy = false;
+  private readonly phaseAttempts = new Map<number, number>();
+  private readonly milestonesSeen = new Set<string>();
 
   constructor() {
     logger.info("Creating bot...");
@@ -77,152 +85,73 @@ export class MinecraftBot {
         logger.info(`Position: ${this.bot.entity.position}`);
         logger.info(`Dimension: ${this.bot.game.dimension}`);
         logger.info(`Health: ${this.bot.health}, Food: ${this.bot.food}`);
-        this.start();
       } else {
         logger.info("Respawned! Re-assessing inventory and determining restart phase...");
-        this.onRespawn();
       }
+      void this.beginRun();
     });
 
     this.bot.on("death", () => {
       logger.error("Bot died!");
-      this.isRunning = false;
-      this.runId++;
-      (this.bot as any).__halt = true;
-      try { this.bot.pathfinder.stop(); } catch {}
+      this.run?.abort();
+      try {
+        this.bot.pathfinder.stop();
+      } catch {
+      }
     });
 
-    this.bot.on("health", () => {
-      this.handleSurvivalInterrupt();
-    });
-
-    this.bot.on("kicked", (reason) => {
-      logger.error(`Bot was kicked: ${reason}`);
-      this.isRunning = false;
-    });
-
-    this.bot.on("error", (err) => {
-      logger.error(`Bot error: ${err.message}`);
-    });
-
+    this.bot.on("health", () => void this.handleSurvivalInterrupt());
+    this.bot.on("kicked", (reason) => logger.error(`Bot was kicked: ${reason}`));
+    this.bot.on("error", (err) => logger.error(`Bot error: ${err.message}`));
     this.bot.on("end", (reason) => {
       logger.info(`Bot disconnected: ${reason}`);
-      this.isRunning = false;
+      this.run?.abort();
     });
   }
 
-  private async handleSurvivalInterrupt(): Promise<void> {
-    if (this.isSurvivalInterrupt) return;
-
-    if (isInLavaOrFire(this.bot)) {
-      this.isSurvivalInterrupt = true;
-      try {
-        await escapeLavaOrFire(this.bot);
-      } catch (err) {
-        logger.warn(`Failed to escape lava/fire: ${err}`);
-      }
-      this.isSurvivalInterrupt = false;
-      return;
-    }
-
-    if (isDrowning(this.bot)) {
-      this.isSurvivalInterrupt = true;
-      logger.warn(`Drowning interrupt: oxygen=${(this.bot as any).oxygenLevel ?? "?"}`);
-      try {
-        await escapeWater(this.bot);
-      } catch (err) {
-        logger.warn(`Failed to escape water: ${err}`);
-      }
-      this.isSurvivalInterrupt = false;
-    }
-
-    if (shouldEat(this.bot)) {
-      this.isSurvivalInterrupt = true;
-      logger.info(`Hunger interrupt: food=${this.bot.food}/20`);
-      try {
-        await eatFood(this.bot);
-      } catch (err) {
-        logger.warn(`Failed to eat during interrupt: ${err}`);
-      }
-      this.isSurvivalInterrupt = false;
-    }
-
-    if (shouldFlee(this.bot)) {
-      this.isSurvivalInterrupt = true;
-      const hostiles = getNearbyHostiles(this.bot, 8);
-      if (hostiles.length > 0) {
-        logger.warn(`Danger! Health=${this.bot.health}/20, ${hostiles.length} hostile(s) nearby`);
-        await flee(this.bot, hostiles[0]!);
-        await eatFood(this.bot);
-      }
-      this.isSurvivalInterrupt = false;
-    }
-  }
-
-  private async onRespawn(): Promise<void> {
+  private async beginRun(): Promise<void> {
     if (this.disposed) return;
-    await sleep(3000);
 
-    logger.info("Re-assessing inventory after respawn...");
-    const items = this.bot.inventory.items();
-    logger.info(`Inventory: ${items.length} item stacks`);
-    for (const item of items) {
-      logger.debug(`  ${item.name} x${item.count}`);
-    }
-
-    this.currentPhaseIndex = 0;
-    for (let i = 0; i < this.phases.length; i++) {
-      const phase = this.phases[i]!;
-      if (phase.canSkip(this.bot)) {
-        logger.info(`Phase "${phase.name}" can be skipped`);
-        this.currentPhaseIndex = i + 1;
-      } else {
-        break;
-      }
-    }
-
-    if (this.currentPhaseIndex < this.phases.length) {
-      logger.info(`Restarting from phase: ${this.phases[this.currentPhaseIndex]!.name}`);
-      this.isRunning = false;
-      await this.start();
-    }
-  }
-
-  async start(): Promise<void> {
-    if (this.disposed) return;
-    if (this.isRunning) {
-      logger.warn("start() called while already running, ignoring");
-      return;
-    }
-    this.isRunning = true;
-    this.runId++;
-    const myRunId = this.runId;
-    (this.bot as any).__halt = false;
-
-    logger.info("=== Starting bot progression ===");
+    this.run?.abort();
+    const run = new AbortController();
+    this.run = run;
+    bindSession(this.bot, run.signal);
+    this.state = "running";
 
     await this.waitForInventoryReady();
-    if (this.runId !== myRunId) return;
+    if (this.isStale(run)) return;
 
-    if ((this.bot.game as any).dimension === "the_end") {
+    if (this.bot.game.dimension === "the_end") {
       logger.info("Already in the End! Goal achieved.");
-      this.isRunning = false;
+      this.state = "done";
       return;
     }
 
+    await this.preamble(run);
+    if (this.isStale(run)) return;
+
+    await this.runPhases(run);
+
+    if (!this.isStale(run) && this.state === "running") {
+      this.state = "done";
+      logger.info("=== All phases completed! ===");
+    }
+  }
+
+  private async preamble(run: AbortController): Promise<void> {
     try {
       await equipBestArmor(this.bot);
     } catch {
     }
-
     try {
       await lootNearbyChests(this.bot, 16);
     } catch {
     }
+    if (this.isStale(run)) return;
 
-    const firstNeededPhase = this.phases.findIndex(p => !p.canSkip(this.bot));
+    const firstNeeded = this.firstNeededPhase(run.signal);
     const currentY = Math.floor(this.bot.entity.position.y);
-    if (firstNeededPhase < 4 && currentY < 50) {
+    if (firstNeeded >= 0 && firstNeeded < SURFACE_PHASE_CUTOFF && currentY < 50) {
       logger.info(`Underground at Y=${currentY} but need surface phases, navigating up...`);
       try {
         await goToY(this.bot, 64);
@@ -231,89 +160,157 @@ export class MinecraftBot {
         logger.warn(`Failed to reach surface: ${err}`);
       }
     }
+  }
 
-    for (let i = this.currentPhaseIndex; i < this.phases.length; i++) {
-      if (!this.isRunning || this.runId !== myRunId) {
-        logger.info("Bot stopped or restarted, halting phase execution");
-        break;
-      }
-
+  private async runPhases(run: AbortController): Promise<void> {
+    for (let i = 0; i < this.phases.length; i++) {
+      if (this.isStale(run)) return;
       const phase = this.phases[i]!;
-
-      if (phase.canSkip(this.bot)) {
+      if (phase.canSkip(this.contextFor(phase, run.signal))) {
         logger.info(`Skipping phase: ${phase.name} (already completed)`);
         continue;
       }
-
-      this.currentPhaseIndex = i;
-      logger.info(`Starting phase ${i + 1}/${this.phases.length}: ${phase.name}`);
-
-      try {
-        await phase.execute(this.bot);
-        if (this.runId !== myRunId) break;
-        logger.info(`Phase "${phase.name}" completed successfully`);
-        this.phaseAttempts.delete(i);
-      } catch (err) {
-        if (this.runId !== myRunId) break;
-        logger.error(`Phase "${phase.name}" failed: ${err}`);
-
-        logger.info(`Retrying phase: ${phase.name}`);
-        try {
-          await sleep(3000);
-          if (this.runId !== myRunId) break;
-          await phase.execute(this.bot);
-          if (this.runId !== myRunId) break;
-          logger.info(`Phase "${phase.name}" succeeded on retry`);
-          this.phaseAttempts.delete(i);
-        } catch (retryErr) {
-          if (this.runId !== myRunId) break;
-          logger.error(`Phase "${phase.name}" failed on retry: ${retryErr}`);
-
-          const attempts = (this.phaseAttempts.get(i) ?? 0) + 1;
-          this.phaseAttempts.set(i, attempts);
-          if (attempts >= this.maxPhaseAttempts) {
-            logger.error(
-              `Phase "${phase.name}" failed ${attempts}x — halting; supervisor/watchdog will take over`,
-            );
-            this.isRunning = false;
-            return;
-          }
-
-          logger.error(
-            `Bot cannot progress; retrying phase "${phase.name}" in 10s (attempt ${attempts}/${this.maxPhaseAttempts})`,
-          );
-          this.isRunning = false;
-          await sleep(10000);
-          this.currentPhaseIndex = i;
-          this.start();
-          return;
-        }
-      }
-
-      try {
-        await freeInventory(this.bot);
-        if (shouldEat(this.bot)) await eatFood(this.bot);
-        await equipBestArmor(this.bot);
-      } catch {
-      }
-
-      this.logInventorySummary();
+      const completed = await this.attemptPhase(i, run);
+      if (!completed) return;
     }
-
-    if (this.isRunning) {
-      logger.info("=== All phases completed! ===");
-      const dim = (this.bot.game as any).dimension;
-      if (dim === "the_end") {
-        logger.info("=== GOAL ACHIEVED: Bot reached the End! ===");
-      } else if (dim === "the_nether") {
-        logger.info("=== Milestone: Bot is in the Nether ===");
-      }
-    }
-
-    this.isRunning = false;
   }
 
-  private async waitForInventoryReady(maxWaitMs: number = 3000): Promise<void> {
+  private async attemptPhase(index: number, run: AbortController): Promise<boolean> {
+    const phase = this.phases[index]!;
+    botEvents.emit("phase:start", { phase: phase.name, index, total: this.phases.length });
+    logger.info(`Starting phase ${index + 1}/${this.phases.length}: ${phase.name}`);
+
+    for (;;) {
+      this.state = "running";
+      try {
+        await phase.execute(this.contextFor(phase, run.signal));
+        if (this.isStale(run)) return false;
+        logger.info(`Phase "${phase.name}" completed successfully`);
+        botEvents.emit("phase:complete", { phase: phase.name, index, total: this.phases.length });
+        this.phaseAttempts.delete(index);
+        await this.afterPhase(run);
+        return true;
+      } catch (err) {
+        if (this.isStale(run)) return false;
+        const attempts = (this.phaseAttempts.get(index) ?? 0) + 1;
+        this.phaseAttempts.set(index, attempts);
+        botEvents.emit("phase:fail", { phase: phase.name, index, total: this.phases.length, error: String(err) });
+        logger.error(`Phase "${phase.name}" failed (attempt ${attempts}/${this.maxPhaseAttempts}): ${err}`);
+
+        if (attempts >= this.maxPhaseAttempts) {
+          logger.error(`Phase "${phase.name}" exhausted attempts — halting; supervisor will take over`);
+          this.state = "halted";
+          return false;
+        }
+
+        this.state = "retrying";
+        await sleep(attempts === 1 ? 3000 : 10000);
+        if (this.isStale(run)) return false;
+      }
+    }
+  }
+
+  private async afterPhase(run: AbortController): Promise<void> {
+    try {
+      await freeInventory(this.bot);
+      if (shouldEat(this.bot)) await eatFood(this.bot);
+      await equipBestArmor(this.bot);
+    } catch {
+    }
+    if (this.isStale(run)) return;
+    this.noteMilestone();
+    this.logInventorySummary();
+  }
+
+  private noteMilestone(): void {
+    const dim = this.bot.game.dimension;
+    if ((dim === "the_nether" || dim === "the_end") && !this.milestonesSeen.has(dim)) {
+      this.milestonesSeen.add(dim);
+      const name = dim === "the_end" ? "Reached the End" : "Entered the Nether";
+      logger.info(`=== Milestone: ${name} ===`);
+      botEvents.emit("milestone", { name, dimension: dim });
+    }
+  }
+
+  private firstNeededPhase(signal: AbortSignal): number {
+    return this.phases.findIndex((p) => !p.canSkip(this.contextFor(p, signal)));
+  }
+
+  private contextFor(phase: Phase, signal: AbortSignal): PhaseContext {
+    return {
+      bot: this.bot,
+      mcData: loadMcData(this.bot),
+      signal,
+      events: botEvents,
+      log: logger.scoped(phase.name),
+    };
+  }
+
+  private isStale(run: AbortController): boolean {
+    return run.signal.aborted || this.run !== run;
+  }
+
+  private async handleSurvivalInterrupt(): Promise<void> {
+    if (this.reflexBusy || this.disposed) return;
+
+    const reflex = this.selectReflex();
+    if (!reflex) return;
+
+    this.reflexBusy = true;
+    beginReflex(this.bot);
+    try {
+      this.bot.pathfinder.stop();
+    } catch {
+    }
+    try {
+      await reflex.run();
+    } catch (err) {
+      logger.warn(`Survival reflex "${reflex.name}" failed: ${err}`);
+    } finally {
+      endReflex(this.bot);
+      this.reflexBusy = false;
+    }
+  }
+
+  private selectReflex(): { name: string; run: () => Promise<void> } | null {
+    if (isInLavaOrFire(this.bot)) {
+      return { name: "escape-lava", run: () => escapeLavaOrFire(this.bot) };
+    }
+    if (isDrowning(this.bot)) {
+      return {
+        name: "escape-water",
+        run: async () => {
+          logger.warn(`Drowning interrupt: oxygen=${(this.bot as any).oxygenLevel ?? "?"}`);
+          await escapeWater(this.bot);
+        },
+      };
+    }
+    if (shouldEat(this.bot)) {
+      return {
+        name: "eat",
+        run: async () => {
+          logger.info(`Hunger interrupt: food=${this.bot.food}/20`);
+          await eatFood(this.bot);
+        },
+      };
+    }
+    if (shouldFlee(this.bot)) {
+      const hostiles = getNearbyHostiles(this.bot, 8);
+      if (hostiles.length > 0) {
+        return {
+          name: "flee",
+          run: async () => {
+            logger.warn(`Danger! Health=${this.bot.health}/20, ${hostiles.length} hostile(s) nearby`);
+            await flee(this.bot, hostiles[0]!);
+            await eatFood(this.bot);
+          },
+        };
+      }
+    }
+    return null;
+  }
+
+  private async waitForInventoryReady(maxWaitMs = 3000): Promise<void> {
     const start = Date.now();
     while (Date.now() - start < maxWaitMs) {
       if (this.bot.inventory.items().length > 0) return;
@@ -323,17 +320,20 @@ export class MinecraftBot {
 
   dispose(): void {
     this.disposed = true;
-    this.isRunning = false;
-    this.runId++;
+    this.state = "idle";
+    this.run?.abort();
     try {
-      (this.bot as any).pathfinder?.stop?.();
-    } catch {}
+      this.bot.pathfinder?.stop?.();
+    } catch {
+    }
     try {
       this.bot.removeAllListeners();
-    } catch {}
+    } catch {
+    }
     try {
       this.bot.quit("harness: retiring instance");
-    } catch {}
+    } catch {
+    }
   }
 
   private logInventorySummary(): void {
@@ -342,10 +342,6 @@ export class MinecraftBot {
       logger.info("Inventory: empty");
       return;
     }
-
-    const summary = items
-      .map((item) => `${item.name}×${item.count}`)
-      .join(", ");
-    logger.info(`Inventory: ${summary}`);
+    logger.info(`Inventory: ${items.map((item) => `${item.name}×${item.count}`).join(", ")}`);
   }
 }
