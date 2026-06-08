@@ -1,7 +1,7 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import type { Entity } from "prismarine-entity";
-import type { Phase } from "./types.js";
+import { definePhase } from "../step.js";
 import { logger } from "../logger.js";
 import { countItem } from "../utils/inventory.js";
 import { findBlockByNames, goToPosition, sleep, type Vec3Like } from "../utils/navigation.js";
@@ -9,37 +9,50 @@ import { mineBlock } from "../utils/mining.js";
 
 const STRONGHOLD_BLOCKS = ["stone_bricks", "stone_brick_stairs", "cracked_stone_bricks", "mossy_stone_bricks"] as const;
 
-export const enterEndPhase: Phase = {
+export const enterEndPhase = definePhase({
   name: "Enter The End",
 
-  canSkip(bot: Bot): boolean {
-    return (bot.game as any).dimension === "the_end";
+  canSkip: ({ bot }) => (bot.game as any).dimension === "the_end",
+
+  steps: () => {
+    let frames: Block[] = [];
+    return [
+      {
+        name: "Verify enough eyes",
+        run: async ({ bot }) => {
+          if (countItem(bot, "ender_eye") < 12) {
+            throw new Error(`Need 12 eyes of ender to open the portal; have ${countItem(bot, "ender_eye")}`);
+          }
+        },
+      },
+      {
+        name: "Locate the stronghold",
+        run: ({ bot }) => locateStronghold(bot),
+      },
+      {
+        name: "Reach the portal room",
+        run: async ({ bot }) => {
+          frames = await reachPortalRoom(bot);
+          if (frames.length < 12) {
+            throw new Error(`Could not find the end portal frame room (found ${frames.length} frames)`);
+          }
+        },
+      },
+      {
+        name: "Fill the portal frames",
+        run: ({ bot }) => fillFrames(bot, frames),
+      },
+      {
+        name: "Enter the portal",
+        run: async ({ bot, log }) => {
+          await enterPortal(bot, frames);
+          if ((bot.game as any).dimension !== "the_end") throw new Error("Did not transition to the End");
+          log.info("=== SUCCESS: Entered the End! ===");
+        },
+      },
+    ];
   },
-
-  async execute(bot: Bot): Promise<void> {
-    logger.info("=== Phase 9: Enter The End ===");
-
-    if (countItem(bot, "ender_eye") < 12) {
-      throw new Error(`Need 12 eyes of ender to open the portal; have ${countItem(bot, "ender_eye")}`);
-    }
-
-    await locateStronghold(bot);
-
-    const frames = await reachPortalRoom(bot);
-    if (frames.length < 12) {
-      throw new Error(`Could not find the end portal frame room (found ${frames.length} frames)`);
-    }
-
-    await fillFrames(bot, frames);
-
-    await enterPortal(bot, frames);
-
-    if ((bot.game as any).dimension !== "the_end") {
-      throw new Error("Did not transition to the End");
-    }
-    logger.info("=== SUCCESS: Entered the End! ===");
-  },
-};
+});
 
 async function locateStronghold(bot: Bot): Promise<void> {
   logger.info("Throwing eyes of ender to locate the stronghold");

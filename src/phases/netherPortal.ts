@@ -1,84 +1,78 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import { Vec3 } from "vec3";
-import type { Phase } from "./types.js";
+import type { LogWriter } from "../logger.js";
 import { logger } from "../logger.js";
+import { definePhase } from "../step.js";
 import { RESOURCE_TARGETS } from "../config.js";
 import { countItem, hasItem, findItem } from "../utils/inventory.js";
 import { findAndMineBlocks, mineBlock } from "../utils/mining.js";
-import { findBlock, goToBlock, goToPosition, sleep } from "../utils/navigation.js";
+import { findBlock, goToBlock, goToPosition, goToY, sleep } from "../utils/navigation.js";
 import { buildNetherPortal, lightPortal, enterPortal } from "../utils/building.js";
 import { fillWaterBucket } from "../utils/fluids.js";
 
-export const netherPortalPhase: Phase = {
+export const netherPortalPhase = definePhase({
   name: "Nether Portal",
 
-  canSkip(bot: Bot): boolean {
-    return (bot.game as any).dimension === "the_nether";
-  },
+  canSkip: ({ bot }) => (bot.game as any).dimension === "the_nether",
 
-  async execute(bot: Bot): Promise<void> {
-    logger.info("=== Phase 6: Nether Portal ===");
+  steps: () => [
+    {
+      name: "Acquire obsidian",
+      isDone: ({ bot }) => countItem(bot, "obsidian") >= RESOURCE_TARGETS.obsidian,
+      run: ({ bot, log }) => acquireObsidian(bot, log),
+    },
+    {
+      name: "Build, light, and enter the portal",
+      run: ({ bot, log }) => buildAndEnterPortal(bot, log),
+    },
+  ],
+});
 
-    let obsidianCount = countItem(bot, "obsidian");
+async function acquireObsidian(bot: Bot, log: LogWriter): Promise<void> {
+  let obsidianCount = countItem(bot, "obsidian");
+  const target = RESOURCE_TARGETS.obsidian;
+  log.info(`Need ${target - obsidianCount} more obsidian`);
 
-    if (obsidianCount < RESOURCE_TARGETS.obsidian) {
-      logger.info(`Need ${RESOURCE_TARGETS.obsidian - obsidianCount} more obsidian`);
+  if (findBlock(bot, "obsidian", 12)) {
+    await findAndMineBlocks(bot, "obsidian", target - obsidianCount, 12);
+    obsidianCount = countItem(bot, "obsidian");
+  }
 
-      if (findBlock(bot, "obsidian", 12)) {
-        await findAndMineBlocks(bot, "obsidian", RESOURCE_TARGETS.obsidian - obsidianCount, 12);
-        obsidianCount = countItem(bot, "obsidian");
-      }
+  if (obsidianCount < target) {
+    log.info("Casting obsidian from lava + water");
+    await createObsidian(bot, target - obsidianCount);
+    obsidianCount = countItem(bot, "obsidian");
+  }
 
-      if (obsidianCount < RESOURCE_TARGETS.obsidian) {
-        logger.info("Casting obsidian from lava + water");
-        await createObsidian(bot, RESOURCE_TARGETS.obsidian - obsidianCount);
-        obsidianCount = countItem(bot, "obsidian");
-      }
-    }
+  if (obsidianCount < target) {
+    throw new Error(`Not enough obsidian: have ${obsidianCount}, need ${target}`);
+  }
+}
 
-    if (obsidianCount < RESOURCE_TARGETS.obsidian) {
-      throw new Error(`Not enough obsidian: have ${obsidianCount}, need ${RESOURCE_TARGETS.obsidian}`);
-    }
+async function buildAndEnterPortal(bot: Bot, log: LogWriter): Promise<void> {
+  if (Math.floor(bot.entity.position.y) < 50) {
+    await goToY(bot, 64);
+  }
 
-    logger.info("Finding a suitable location for portal");
-    const currentY = Math.floor(bot.entity.position.y);
-    if (currentY < 50) {
-      const { goToY } = await import("../utils/navigation.js");
-      await goToY(bot, 64);
-    }
+  const basePos = bot.entity.position.floored().offset(2, 0, 0);
+  await buildNetherPortal(bot, basePos);
 
-    const basePos = bot.entity.position.floored().offset(2, 0, 0);
-    const groundBlock = bot.blockAt(basePos.offset(0, -1, 0));
-    if (!groundBlock || groundBlock.name === "air") {
-      const solidGround = bot.entity.position.floored();
-      await buildNetherPortal(bot, solidGround.offset(2, 0, 0));
-    } else {
-      await buildNetherPortal(bot, basePos);
-    }
+  await ensureFlintAndSteel(bot);
+  if (!hasItem(bot, "flint_and_steel")) {
+    throw new Error("No flint and steel to light portal (could not obtain flint)!");
+  }
+  await lightPortal(bot, basePos);
 
-    await ensureFlintAndSteel(bot);
-    if (!hasItem(bot, "flint_and_steel")) {
-      throw new Error("No flint and steel to light portal (could not obtain flint)!");
-    }
-    await lightPortal(bot, basePos);
-
-    await sleep(1000);
-    const entered = await enterPortal(bot, basePos);
-
-    if (entered) {
-      logger.info("=== SUCCESS: Entered the Nether! ===");
-    } else {
-      logger.warn("Failed to enter the Nether portal, retrying...");
-      const retryEnter = await enterPortal(bot, basePos);
-      if (retryEnter) {
-        logger.info("=== SUCCESS: Entered the Nether! ===");
-      } else {
-        throw new Error("Failed to enter the Nether");
-      }
-    }
-  },
-};
+  await sleep(1000);
+  let entered = await enterPortal(bot, basePos);
+  if (!entered) {
+    log.warn("Failed to enter the Nether portal, retrying...");
+    entered = await enterPortal(bot, basePos);
+  }
+  if (!entered) throw new Error("Failed to enter the Nether");
+  log.info("=== SUCCESS: Entered the Nether! ===");
+}
 
 async function ensureFlintAndSteel(bot: Bot): Promise<void> {
   if (hasItem(bot, "flint_and_steel")) return;

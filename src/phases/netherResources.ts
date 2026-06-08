@@ -1,6 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { Entity } from "prismarine-entity";
-import type { Phase } from "./types.js";
+import { definePhase } from "../step.js";
 import { logger } from "../logger.js";
 import { RESOURCE_TARGETS } from "../config.js";
 import { countItem, hasItem, findItem, equipBestArmor, equipBestWeapon } from "../utils/inventory.js";
@@ -13,55 +13,53 @@ import { eatFood, getFoodCount } from "../utils/survival.js";
 const FORTRESS_BLOCKS = ["nether_bricks", "nether_brick_fence", "nether_brick_stairs"] as const;
 const NETHER_GOLD_BLOCKS = ["nether_gold_ore", "gilded_blackstone"] as const;
 
-export const netherResourcesPhase: Phase = {
+export const netherResourcesPhase = definePhase({
   name: "Nether Resources",
 
-  canSkip(bot: Bot): boolean {
+  canSkip: ({ bot }) => {
     if (countItem(bot, "ender_eye") >= 12) return true;
-    const rods = countItem(bot, "blaze_rod");
-    const powder = countItem(bot, "blaze_powder");
-    const pearls = countItem(bot, "ender_pearl");
-    return rods * 2 + powder >= 12 && pearls >= 12;
+    const value = countItem(bot, "blaze_rod") * 2 + countItem(bot, "blaze_powder");
+    return value >= 12 && countItem(bot, "ender_pearl") >= 12;
   },
 
-  async execute(bot: Bot): Promise<void> {
-    logger.info("=== Phase 7: Nether Resources ===");
-
-    if ((bot.game as any).dimension !== "the_nether") {
-      throw new Error("Not in the Nether — cannot run the nether resource phase");
-    }
-
-    if (!(bot as any).__netherHome) {
-      const portal = findBlockByNames(bot, ["nether_portal"], 16);
-      const here = portal ? portal.position : bot.entity.position;
-      (bot as any).__netherHome = { x: here.x, y: here.y, z: here.z };
-      logger.info(`Recorded nether home portal at ${Math.round(here.x)},${Math.round(here.y)},${Math.round(here.z)}`);
-    }
-
-    await safeEquip(bot);
-
-    if (!haveEnoughBlaze(bot)) {
-      await gatherBlazeRods(bot);
-    }
-
-    if (countItem(bot, "ender_pearl") < RESOURCE_TARGETS.enderPearls) {
-      await gatherEnderPearls(bot);
-    }
-
-    const rods = countItem(bot, "blaze_rod");
-    const pearls = countItem(bot, "ender_pearl");
-    logger.info(`Nether resources status: ${rods} blaze rods, ${pearls} ender pearls`);
-
-    if (!haveEnoughBlaze(bot)) {
-      throw new Error(`Not enough blaze rods (have ${rods}); need materials for 12 eyes`);
-    }
-    if (pearls < 12) {
-      throw new Error(`Not enough ender pearls (have ${pearls}); need 12+`);
-    }
-
-    logger.info("Phase 7 complete: blaze rods and ender pearls secured");
-  },
-};
+  steps: () => [
+    {
+      name: "Prepare for the Nether run",
+      run: async ({ bot, log }) => {
+        if ((bot.game as any).dimension !== "the_nether") {
+          throw new Error("Not in the Nether — cannot run the nether resource phase");
+        }
+        if (!(bot as any).__netherHome) {
+          const portal = findBlockByNames(bot, ["nether_portal"], 16);
+          const here = portal ? portal.position : bot.entity.position;
+          (bot as any).__netherHome = { x: here.x, y: here.y, z: here.z };
+          log.info(`Recorded nether home portal at ${Math.round(here.x)},${Math.round(here.y)},${Math.round(here.z)}`);
+        }
+        await safeEquip(bot);
+      },
+    },
+    {
+      name: "Gather blaze rods",
+      isDone: ({ bot }) => haveEnoughBlaze(bot),
+      run: ({ bot }) => gatherBlazeRods(bot),
+    },
+    {
+      name: "Gather ender pearls",
+      isDone: ({ bot }) => countItem(bot, "ender_pearl") >= RESOURCE_TARGETS.enderPearls,
+      run: ({ bot }) => gatherEnderPearls(bot),
+    },
+    {
+      name: "Verify resources secured",
+      run: async ({ bot, log }) => {
+        const rods = countItem(bot, "blaze_rod");
+        const pearls = countItem(bot, "ender_pearl");
+        log.info(`Nether resources status: ${rods} blaze rods, ${pearls} ender pearls`);
+        if (!haveEnoughBlaze(bot)) throw new Error(`Not enough blaze rods (have ${rods}); need materials for 12 eyes`);
+        if (pearls < 12) throw new Error(`Not enough ender pearls (have ${pearls}); need 12+`);
+      },
+    },
+  ],
+});
 
 function blazeValue(bot: Bot): number {
   return countItem(bot, "blaze_rod") * 2 + countItem(bot, "blaze_powder");

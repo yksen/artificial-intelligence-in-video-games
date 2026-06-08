@@ -1,63 +1,62 @@
-import type { Bot } from "mineflayer";
-import type { Phase } from "./types.js";
-import { logger } from "../logger.js";
+import { definePhase } from "../step.js";
 import { RESOURCE_TARGETS } from "../config.js";
 import { countItem, hasItem, hasPickaxeTier } from "../utils/inventory.js";
 import { findAndMineBlocks } from "../utils/mining.js";
 import { craftItem, ensureItem } from "../utils/crafting.js";
 
-export const stoneAgePhase: Phase = {
+export const stoneAgePhase = definePhase({
   name: "Stone Age",
 
-  canSkip(bot: Bot): boolean {
-    const hasStonePickaxe = hasPickaxeTier(bot, "stone");
-    const hasFurnace = hasItem(bot, "furnace") ||
-      (require("minecraft-data")(bot.version) &&
-        bot.findBlock({
-          matching: require("minecraft-data")(bot.version).blocksByName["furnace"]?.id,
-          maxDistance: 32,
-        }) !== null);
-    return hasStonePickaxe && hasFurnace;
+  canSkip({ bot, mcData }) {
+    const furnaceId = mcData.blocksByName["furnace"]?.id;
+    const hasFurnace =
+      hasItem(bot, "furnace") ||
+      (furnaceId !== undefined && bot.findBlock({ matching: furnaceId, maxDistance: 32 }) !== null);
+    return hasPickaxeTier(bot, "stone") && hasFurnace;
   },
 
-  async execute(bot: Bot): Promise<void> {
-    logger.info("=== Phase 2: Stone Age ===");
-
-    const currentCobble = countItem(bot, "cobblestone");
-    const needed = RESOURCE_TARGETS.cobblestone - currentCobble;
-
-    if (needed > 0) {
-      logger.info(`Need to mine ${needed} more cobblestone`);
-      const mined = await findAndMineBlocks(bot, "stone", needed);
-      logger.info(`Mined ${mined} stone (drops as cobblestone)`);
-    }
-
-    await ensureItem(bot, "stick", 8);
-
-    if (!hasPickaxeTier(bot, "stone")) {
-      await craftItem(bot, "stone_pickaxe", 1);
-      logger.info("Crafted stone pickaxe");
-    }
-
-    if (!hasItem(bot, "stone_sword") && !hasItem(bot, "iron_sword")) {
-      try {
-        await craftItem(bot, "stone_sword", 1);
-        logger.info("Crafted stone sword");
-      } catch {
-        logger.debug("Couldn't craft stone sword");
-      }
-    }
-
-    if (!hasItem(bot, "furnace")) {
-      const cobbleCount = countItem(bot, "cobblestone");
-      if (cobbleCount < 8) {
-        const moreCobble = await findAndMineBlocks(bot, "stone", 8 - cobbleCount);
-        logger.info(`Mined ${moreCobble} more cobblestone for furnace`);
-      }
-      await craftItem(bot, "furnace", 1);
-      logger.info("Crafted furnace");
-    }
-
-    logger.info("Phase 2 complete: Stone tools and furnace ready");
-  },
-};
+  steps: () => [
+    {
+      name: "Mine cobblestone",
+      isDone: ({ bot }) => countItem(bot, "cobblestone") >= RESOURCE_TARGETS.cobblestone,
+      run: async ({ bot, log }) => {
+        const needed = RESOURCE_TARGETS.cobblestone - countItem(bot, "cobblestone");
+        const mined = await findAndMineBlocks(bot, "stone", needed);
+        log.info(`Mined ${mined} stone (drops as cobblestone)`);
+      },
+    },
+    {
+      name: "Ensure sticks",
+      isDone: ({ bot }) => countItem(bot, "stick") >= 4,
+      run: ({ bot }) => ensureItem(bot, "stick", 8),
+    },
+    {
+      name: "Craft stone pickaxe",
+      isDone: ({ bot }) => hasPickaxeTier(bot, "stone"),
+      run: ({ bot }) => craftItem(bot, "stone_pickaxe", 1),
+    },
+    {
+      name: "Craft stone sword",
+      isDone: ({ bot }) => hasItem(bot, "stone_sword") || hasItem(bot, "iron_sword"),
+      run: async ({ bot, log }) => {
+        try {
+          await craftItem(bot, "stone_sword", 1);
+        } catch {
+          log.debug("Couldn't craft stone sword");
+        }
+      },
+    },
+    {
+      name: "Craft furnace",
+      isDone: ({ bot }) => hasItem(bot, "furnace"),
+      run: async ({ bot, log }) => {
+        const cobbleCount = countItem(bot, "cobblestone");
+        if (cobbleCount < 8) {
+          await findAndMineBlocks(bot, "stone", 8 - cobbleCount);
+        }
+        await craftItem(bot, "furnace", 1);
+        log.info("Crafted furnace");
+      },
+    },
+  ],
+});

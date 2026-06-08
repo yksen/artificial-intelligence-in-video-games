@@ -1,73 +1,70 @@
 import type { Bot } from "mineflayer";
-import type { Phase } from "./types.js";
-import { logger } from "../logger.js";
+import { definePhase } from "../step.js";
 import { MINING, RESOURCE_TARGETS } from "../config.js";
 import { countItem, hasItem, hasPickaxeTier } from "../utils/inventory.js";
 import { findAndMineBlocks, digDownTo, branchMine } from "../utils/mining.js";
 import { craftItem, ensureItem } from "../utils/crafting.js";
-import { findBlock } from "../utils/navigation.js";
+import { fillWaterBucket } from "../utils/fluids.js";
 
-export const diamondMiningPhase: Phase = {
+const enoughDiamonds = (bot: Bot): boolean => countItem(bot, "diamond") >= RESOURCE_TARGETS.diamonds;
+
+export const diamondMiningPhase = definePhase({
   name: "Diamond Mining",
 
-  canSkip(bot: Bot): boolean {
-    return hasItem(bot, "diamond_pickaxe") || countItem(bot, "diamond") >= RESOURCE_TARGETS.diamonds;
-  },
+  canSkip: ({ bot }) => hasItem(bot, "diamond_pickaxe") || enoughDiamonds(bot),
 
-  async execute(bot: Bot): Promise<void> {
-    logger.info("=== Phase 5: Diamond Mining ===");
-
-    if (!hasPickaxeTier(bot, "iron")) {
-      throw new Error("No iron pickaxe or better available — cannot mine diamond ore");
-    }
-
-    if (!hasItem(bot, "water_bucket") && hasItem(bot, "bucket")) {
-      const { fillWaterBucket } = await import("../utils/fluids.js");
-      if (await fillWaterBucket(bot)) logger.info("Filled water bucket for lava safety");
-    }
-
-    const currentY = Math.floor(bot.entity.position.y);
-    if (currentY > MINING.diamondY + 5) {
-      logger.info(`Currently at Y=${currentY}, digging down to Y=${MINING.diamondY}`);
-      await digDownTo(bot, MINING.diamondY);
-    }
-
-    let diamondCount = countItem(bot, "diamond");
-    if (diamondCount < RESOURCE_TARGETS.diamonds) {
-      const surfaceDiamonds = await findAndMineBlocks(
-        bot,
-        "diamond_ore",
-        RESOURCE_TARGETS.diamonds - diamondCount,
-        MINING.oreSearchDistance
-      );
-      diamondCount = countItem(bot, "diamond");
-      if (surfaceDiamonds > 0) {
-        logger.info(`Found ${surfaceDiamonds} exposed diamond ore!`);
-      }
-    }
-
-    if (diamondCount < RESOURCE_TARGETS.diamonds) {
-      logger.info("Starting branch mining for diamonds...");
-      const found = await branchMine(
-        bot,
-        "diamond_ore",
-        RESOURCE_TARGETS.diamonds - diamondCount
-      );
-      diamondCount = countItem(bot, "diamond");
-      logger.info(`Branch mining found ${found} diamonds (total: ${diamondCount})`);
-    }
-
-    if (!hasItem(bot, "diamond_pickaxe") && diamondCount >= 3) {
-      await ensureItem(bot, "stick", 2);
-      await craftItem(bot, "diamond_pickaxe", 1);
-      logger.info("Crafted diamond pickaxe!");
-    }
-
-    if (!hasItem(bot, "diamond_pickaxe")) {
-      logger.warn(`Only found ${diamondCount} diamonds, need 3 for diamond pickaxe`);
-      throw new Error("Failed to obtain enough diamonds for diamond pickaxe");
-    }
-
-    logger.info("Phase 5 complete: Diamond pickaxe crafted!");
-  },
-};
+  steps: () => [
+    {
+      name: "Verify iron pickaxe",
+      run: async ({ bot }) => {
+        if (!hasPickaxeTier(bot, "iron")) {
+          throw new Error("No iron pickaxe or better available — cannot mine diamond ore");
+        }
+      },
+    },
+    {
+      name: "Fill water bucket for lava safety",
+      isDone: ({ bot }) => hasItem(bot, "water_bucket") || !hasItem(bot, "bucket"),
+      run: async ({ bot, log }) => {
+        if (await fillWaterBucket(bot)) log.info("Filled water bucket for lava safety");
+      },
+    },
+    {
+      name: "Dig down to diamond level",
+      isDone: ({ bot }) => Math.floor(bot.entity.position.y) <= MINING.diamondY + 5,
+      run: ({ bot }) => digDownTo(bot, MINING.diamondY),
+    },
+    {
+      name: "Mine exposed diamond ore",
+      isDone: ({ bot }) => enoughDiamonds(bot),
+      run: async ({ bot, log }) => {
+        const found = await findAndMineBlocks(
+          bot,
+          "diamond_ore",
+          RESOURCE_TARGETS.diamonds - countItem(bot, "diamond"),
+          MINING.oreSearchDistance,
+        );
+        if (found > 0) log.info(`Found ${found} exposed diamond ore`);
+      },
+    },
+    {
+      name: "Branch mine for diamonds",
+      isDone: ({ bot }) => enoughDiamonds(bot),
+      run: async ({ bot, log }) => {
+        const found = await branchMine(bot, "diamond_ore", RESOURCE_TARGETS.diamonds - countItem(bot, "diamond"));
+        log.info(`Branch mining found ${found} diamonds (total: ${countItem(bot, "diamond")})`);
+      },
+    },
+    {
+      name: "Craft diamond pickaxe",
+      isDone: ({ bot }) => hasItem(bot, "diamond_pickaxe"),
+      run: async ({ bot }) => {
+        if (countItem(bot, "diamond") < 3) {
+          throw new Error(`Failed to obtain enough diamonds for diamond pickaxe (have ${countItem(bot, "diamond")})`);
+        }
+        await ensureItem(bot, "stick", 2);
+        await craftItem(bot, "diamond_pickaxe", 1);
+      },
+    },
+  ],
+});
