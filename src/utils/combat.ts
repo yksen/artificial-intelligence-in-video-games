@@ -1,9 +1,10 @@
 import type { Bot } from "mineflayer";
 import type { Entity } from "prismarine-entity";
-import { logger } from "../logger.js";
-import { SURVIVAL_THRESHOLDS, HOSTILE_MOBS } from "../config.js";
+import { logger, type LogWriter } from "../logger.js";
+import { SURVIVAL_THRESHOLDS, HOSTILE_MOBS, FOOD_ANIMALS, FOOD_ITEMS, RAW_FOOD_ITEMS, RESOURCE_TARGETS } from "../config.js";
 import { equipBestWeapon } from "./inventory.js";
 import { goToPosition, sleep } from "./navigation.js";
+import { throwIfAborted } from "../runtime.js";
 
 export function getNearbyHostiles(bot: Bot, range: number = 16): Entity[] {
   return Object.values(bot.entities).filter((entity) => {
@@ -136,6 +137,82 @@ export async function killEntity(
   }
   if (blocking) lowerShield(bot);
   return !entity.isValid;
+}
+
+export async function huntNearbyAnimals(
+  bot: Bot,
+  log: LogWriter,
+  opts: { durationMs: number; radius?: number; foodTarget?: number },
+): Promise<number> {
+  const radius = opts.radius ?? 24;
+  const foodTarget = opts.foodTarget ?? RESOURCE_TARGETS.cookedFood;
+  const deadline = Date.now() + opts.durationMs;
+  const home = bot.entity.position.clone();
+  const failed = new Set<number>();
+  let killed = 0;
+
+  const foodOnHand = (): number =>
+    bot.inventory.items().reduce((sum, i) => {
+      const isFood = FOOD_ITEMS.includes(i.name as any) || RAW_FOOD_ITEMS.includes(i.name as any);
+      return isFood ? sum + i.count : sum;
+    }, 0);
+
+  const nearestAnimal = (): Entity | null => {
+    let best: Entity | null = null;
+    let bestDist = Infinity;
+    for (const e of Object.values(bot.entities)) {
+      if (!e || !e.name || e === bot.entity) continue;
+      if (!FOOD_ANIMALS.includes(e.name as any)) continue;
+      if ((e as any).isValid === false || failed.has(e.id)) continue;
+      if (e.position.distanceTo(home) > radius) continue;
+      const d = e.position.distanceTo(bot.entity.position);
+      if (d < bestDist) {
+        bestDist = d;
+        best = e;
+      }
+    }
+    return best;
+  };
+
+  while (Date.now() < deadline) {
+    throwIfAborted(bot);
+    if (foodOnHand() >= foodTarget) break;
+
+    const remaining = deadline - Date.now();
+    const animal = nearestAnimal();
+    if (!animal) {
+      await sleep(Math.min(1500, Math.max(0, remaining)));
+      continue;
+    }
+
+    const id = animal.id;
+    const where = animal.position.clone();
+    try {
+      log.info(`Smelting downtime: hunting ${animal.name} (${Math.round(where.distanceTo(bot.entity.position))}m)`);
+      const ok = await killEntity(bot, animal, { timeoutMs: Math.min(12_000, remaining), minHealth: 0 });
+      if (ok) killed++;
+      else failed.add(id);
+      await sleep(300);
+      try {
+        await goToPosition(bot, where, 0);
+      } catch {
+      }
+    } catch (err) {
+      failed.add(id);
+      log.debug(`Smelting-downtime hunt failed: ${err}`);
+    }
+
+    if (bot.entity.position.distanceTo(home) > radius) {
+      try {
+        await goToPosition(bot, { x: home.x, y: home.y, z: home.z }, 2);
+      } catch {
+      }
+    }
+  }
+
+  const leftover = deadline - Date.now();
+  if (leftover > 0) await sleep(leftover);
+  return killed;
 }
 
 export function shouldFlee(bot: Bot): boolean {

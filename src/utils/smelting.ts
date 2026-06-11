@@ -1,13 +1,14 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import { logger } from "../logger.js";
-import { FUEL_ITEMS } from "../config.js";
+import { FUEL_ITEMS, SMELT_DOWNTIME } from "../config.js";
+import { botEvents } from "../events.js";
 import { findBlock, goToBlock, sleep } from "./navigation.js";
 import { findAnyItem, freeInventory, countItem } from "./inventory.js";
-import { mineBlock } from "./mining.js";
 import { placeBlockFromInventory } from "./placement.js";
 import { craftItem } from "./crafting.js";
 import { escapeWater } from "./survival.js";
+import { huntNearbyAnimals } from "./combat.js";
 
 export async function ensureFurnace(bot: Bot): Promise<Block> {
   const existing = findBlock(bot, "furnace", 4);
@@ -72,8 +73,20 @@ export async function smeltItems(
   }
 
   const waitTime = count * 10000 + 2000;
-  logger.info(`Waiting ~${Math.ceil(waitTime / 1000)}s for smelting...`);
-  await sleep(waitTime);
+  const waitSeconds = Math.ceil(waitTime / 1000);
+  botEvents.emit("smelt:wait", { seconds: waitSeconds });
+
+  if (SMELT_DOWNTIME.enabled) {
+    logger.info(`Smelting ~${waitSeconds}s — using downtime to hunt nearby food`);
+    const killed = await huntNearbyAnimals(bot, logger, {
+      durationMs: waitTime,
+      radius: SMELT_DOWNTIME.huntRadius,
+    });
+    if (killed > 0) logger.info(`Smelting downtime: hunted ${killed} animal${killed === 1 ? "" : "s"}`);
+  } else {
+    logger.info(`Waiting ~${waitSeconds}s for smelting...`);
+    await sleep(waitTime);
+  }
 
   await freeInventory(bot);
   const collectBlock = findBlock(bot, "furnace", 16) ?? furnaceBlock;

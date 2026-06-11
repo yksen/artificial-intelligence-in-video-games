@@ -2,8 +2,9 @@ import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import { logger } from "../logger.js";
 import { MINING } from "../config.js";
-import { findBlock, findBlocks, findBlockByNames, goToBlock, sleep, ensureNotHalted, type Vec3Like } from "./navigation.js";
+import { findBlock, findBlocks, findBlockByNames, goToBlock, sleep, type Vec3Like } from "./navigation.js";
 import { hasPickaxeTier, freeInventory } from "./inventory.js";
+import { throwIfAborted } from "../runtime.js";
 
 const IRON_PICKAXE_REQUIRED = new Set([
   "diamond_ore",
@@ -13,7 +14,7 @@ const IRON_PICKAXE_REQUIRED = new Set([
 ]);
 
 export async function mineBlock(bot: Bot, block: Block): Promise<void> {
-  ensureNotHalted(bot);
+  throwIfAborted(bot);
   if (IRON_PICKAXE_REQUIRED.has(block.name) && !hasPickaxeTier(bot, "iron")) {
     throw new Error(`Cannot mine ${block.name}: requires iron pickaxe or better`);
   }
@@ -70,7 +71,7 @@ async function collectBlocksByIds(
   let stagnation = 0;
 
   while (mined < count && stagnation < 3) {
-    ensureNotHalted(bot);
+    throwIfAborted(bot);
     await freeInventory(bot);
 
     const positions = bot.findBlocks({ matching: ids, maxDistance, count: count - mined });

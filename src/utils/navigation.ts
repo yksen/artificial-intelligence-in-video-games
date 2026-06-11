@@ -1,17 +1,13 @@
 import type { Bot } from "mineflayer";
 import type { Block } from "prismarine-block";
 import { goals, Movements } from "mineflayer-pathfinder";
-import { logger } from "../logger.js";
 import { NAVIGATION, MINING } from "../config.js";
+import { throwIfAborted, yieldToReflex } from "../runtime.js";
 
 export interface Vec3Like {
   x: number;
   y: number;
   z: number;
-}
-
-export function ensureNotHalted(bot: Bot): void {
-  if ((bot as any).__halt) throw new Error("[bot] run halted (death/restart) — aborting stale phase");
 }
 
 export function configureMovements(bot: Bot): Movements {
@@ -26,6 +22,7 @@ export function configureMovements(bot: Bot): Movements {
 }
 
 async function gotoWithTimeout(bot: Bot, goal: any, timeoutMs: number = NAVIGATION.gotoTimeoutMs): Promise<void> {
+  await yieldToReflex(bot);
   bot.pathfinder.setMovements(configureMovements(bot));
   const gotoP = bot.pathfinder.goto(goal);
   gotoP.catch(() => {});
@@ -46,7 +43,7 @@ async function gotoWithTimeout(bot: Bot, goal: any, timeoutMs: number = NAVIGATI
 }
 
 export async function goToBlock(bot: Bot, block: Block): Promise<void> {
-  ensureNotHalted(bot);
+  throwIfAborted(bot);
   const goal = new goals.GoalGetToBlock(block.position.x, block.position.y, block.position.z);
   await gotoWithTimeout(bot, goal);
 }
@@ -57,13 +54,13 @@ export async function goToPosition(
   range: number = NAVIGATION.defaultRange,
   timeoutMs: number = NAVIGATION.gotoTimeoutMs,
 ): Promise<void> {
-  ensureNotHalted(bot);
+  throwIfAborted(bot);
   const goal = new goals.GoalNear(pos.x, pos.y, pos.z, range);
   await gotoWithTimeout(bot, goal, timeoutMs);
 }
 
 export async function goToY(bot: Bot, y: number): Promise<void> {
-  ensureNotHalted(bot);
+  throwIfAborted(bot);
   const goal = new goals.GoalY(y);
   await gotoWithTimeout(bot, goal, NAVIGATION.gotoTimeoutMs * 2);
 }
