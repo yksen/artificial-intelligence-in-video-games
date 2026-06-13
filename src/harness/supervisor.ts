@@ -17,6 +17,7 @@ import { Dashboard, type ControlHandler } from "./dashboard/server.js";
 import { TestRunner } from "./dashboard/testRunner.js";
 import { attachInstrumentation } from "./instrument.js";
 import { MinecraftBot } from "../bot.js";
+import { botEvents } from "../events.js";
 
 export class Supervisor {
   private recorder: Recorder;
@@ -65,12 +66,12 @@ export class Supervisor {
     });
 
     this.installLogSink();
+    this.installBotEventBridge();
   }
 
   get runDir(): string {
     return this.recorder.runDir;
   }
-
 
   async run(): Promise<void> {
     this.installSignalHandlers();
@@ -181,7 +182,6 @@ export class Supervisor {
     bot.on("end", (reason: any) => void this.handleBotEnd(String(reason)));
   }
 
-
   private async beginRestart(reason: string): Promise<boolean> {
     if (this.shuttingDown || !this.runActive) return false;
     if (this.paused) {
@@ -280,7 +280,6 @@ export class Supervisor {
     }
   }
 
-
   private async handleDeath(): Promise<void> {
     if (this.shuttingDown || !this.runActive) return;
     const phase = this.tracer.phase ?? "unknown";
@@ -342,7 +341,6 @@ export class Supervisor {
     }
   }
 
-
   private controls(): Record<string, ControlHandler> {
     return {
       startRun: async (args) => {
@@ -380,31 +378,30 @@ export class Supervisor {
     };
   }
 
-
   private installLogSink(): void {
     logger.addSink((level, message) => {
       this.recorder.record("log", { level, message });
+    });
+  }
 
-      let m: RegExpMatchArray | null;
-      if ((m = message.match(/Starting phase (\d+)\/(\d+): (.+)$/))) {
-        this.recorder.record("phase", {
-          action: "start",
-          phase: m[3]!,
-          index: parseInt(m[1]!, 10) - 1,
-          total: parseInt(m[2]!, 10),
-        });
-      } else if ((m = message.match(/Phase "(.+?)" completed successfully/))) {
-        this.recorder.record("phase", { action: "complete", phase: m[1]! });
-        if (HARNESS.autoCheckpointOnPhaseComplete && this.rcon.connected) {
-          this.checkpoints
-            .save(m[1]!, this.bot)
-            .catch((err) => this.sup(`auto-checkpoint failed: ${err}`));
-        }
-      } else if ((m = message.match(/Phase "(.+?)" failed/))) {
-        this.recorder.record("phase", { action: "fail", phase: m[1]! });
-      } else if ((m = message.match(/Waiting ~(\d+)s for smelting/))) {
-        this.watchdog.grantGrace((parseInt(m[1]!, 10) + 30) * 1000);
+  private installBotEventBridge(): void {
+    botEvents.on("phase:start", (e) => {
+      this.recorder.record("phase", { action: "start", phase: e.phase, index: e.index, total: e.total });
+    });
+    botEvents.on("phase:complete", (e) => {
+      this.recorder.record("phase", { action: "complete", phase: e.phase, index: e.index, total: e.total });
+      if (HARNESS.autoCheckpointOnPhaseComplete && this.rcon.connected) {
+        this.checkpoints.save(e.phase, this.bot).catch((err) => this.sup(`auto-checkpoint failed: ${err}`));
       }
+    });
+    botEvents.on("phase:fail", (e) => {
+      this.recorder.record("phase", { action: "fail", phase: e.phase, index: e.index, total: e.total });
+    });
+    botEvents.on("smelt:wait", (e) => {
+      this.watchdog.grantGrace((e.seconds + 30) * 1000);
+    });
+    botEvents.on("milestone", (e) => {
+      this.sup(`Milestone reached: ${e.name} (${e.dimension})`);
     });
   }
 
@@ -457,6 +454,7 @@ export class Supervisor {
     };
     process.on("SIGINT", () => onSignal("SIGINT"));
     process.on("SIGTERM", () => onSignal("SIGTERM"));
+    process.on("SIGHUP", () => onSignal("SIGHUP"));
     process.on("uncaughtException", (err) => {
       this.sup(`uncaughtException: ${err?.message ?? err}`);
       this.diagnostics.capture("uncaught-exception", { message: String(err?.message ?? err) }).catch(() => {});

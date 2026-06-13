@@ -1,7 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-
 export const PROJECT_ROOT = resolve(import.meta.dir, "..", "..");
 
 function detectJavaBin(): string {

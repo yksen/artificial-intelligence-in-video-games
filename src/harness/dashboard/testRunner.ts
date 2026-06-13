@@ -115,7 +115,6 @@ export class TestRunner {
     }
   }
 
-
   private pump(): void {
     while (this.procs.size < this.concurrency && this.queue.length) {
       const name = this.queue.shift()!;

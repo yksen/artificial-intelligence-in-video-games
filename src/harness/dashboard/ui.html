@@ -50,10 +50,10 @@
       .tab-btn {
         font: 600 13px var(--sans); color: var(--muted);
         padding: 0 14px; border: none; background: none; cursor: pointer;
-        display: flex; align-items: center; gap: 8px; border-bottom: 2px solid transparent;
+        display: flex; align-items: center; gap: 8px;
       }
       .tab-btn:hover { color: var(--text); }
-      .tab-btn.active { color: #fff; border-bottom-color: var(--accent); }
+      .tab-btn.active { color: #fff; font-weight: 700; }
       .spacer { flex: 1; }
 
       /* ---------- views ---------- */
@@ -211,9 +211,19 @@
           <div id="runCtl" style="display:none">
             <div class="run-row">
               <span class="tstatus st-idle" id="runStateBadge"><span class="sd"></span>idle</span>
+            </div>
+            <div class="controls" style="margin-top:9px">
               <button class="primary" id="runBtn" onclick="toggleRun()"><svg class="ic ic-fill"><use href="#i-play" /></svg> Start run</button>
+              <button class="run-only" onclick="ctl('checkpoint',{label:prompt('Checkpoint label','manual')||'manual'})"><svg class="ic"><use href="#i-camera" /></svg> Checkpoint</button>
+              <button class="run-only" onclick="ctl('restoreLast',{})"><svg class="ic"><use href="#i-skip-back" /></svg> Restore last</button>
+              <button class="run-only" onclick="ctl('restartBot',{})"><svg class="ic"><use href="#i-refresh" /></svg> Restart bot</button>
+              <button class="run-only danger" onclick="ctl('restartServer',{})"><svg class="ic"><use href="#i-server" /></svg> Restart server</button>
+              <button class="run-only" id="pauseBtn" onclick="togglePause()"><svg class="ic ic-fill"><use href="#i-pause" /></svg> Pause</button>
             </div>
           </div>
+
+          <h2>Phase timeline</h2>
+          <div class="timeline" id="timeline"></div>
 
           <h2>Live state</h2>
           <div class="kv">
@@ -229,18 +239,6 @@
 
           <h2>Inventory</h2>
           <div class="v mono" id="sInv" style="font-size:12px;color:var(--muted);padding-bottom:4px">—</div>
-
-          <h2>Controls</h2>
-          <div class="controls">
-            <button class="run-only" onclick="ctl('checkpoint',{label:prompt('Checkpoint label','manual')||'manual'})"><svg class="ic"><use href="#i-camera" /></svg> Checkpoint</button>
-            <button class="run-only" onclick="ctl('restoreLast',{})"><svg class="ic"><use href="#i-skip-back" /></svg> Restore last</button>
-            <button class="run-only" onclick="ctl('restartBot',{})"><svg class="ic"><use href="#i-refresh" /></svg> Restart bot</button>
-            <button class="run-only danger" onclick="ctl('restartServer',{})"><svg class="ic"><use href="#i-server" /></svg> Restart server</button>
-            <button class="run-only" id="pauseBtn" onclick="togglePause()"><svg class="ic ic-fill"><use href="#i-pause" /></svg> Pause</button>
-          </div>
-
-          <h2>Phase timeline</h2>
-          <div class="timeline" id="timeline"></div>
         </div>
 
         <!-- CENTER: 3D viewer + event feed -->
@@ -330,7 +328,7 @@
           case "op:start": return `> ${d.op} ${fmtArgs(d.args)}`;
           case "op:end": return `${d.outcome === "ok" ? "ok" : d.outcome === "timeout" ? "timeout" : "fail"} ${d.op} (${d.durationMs}ms)${d.error ? " — " + d.error : ""}`;
           case "mc": return `mc:${d.event} ${fmtArgs(d, ["event"])}`;
-          case "phase": return `phase ${d.action}: ${d.phase}${d.index != null ? ` (${d.index + 1}/${d.total})` : ""}`;
+          case "phase": return `phase ${d.action}: ${d.phase}${d.index != null ? ` (${d.index + 1}${d.total != null ? `/${d.total}` : ""})` : ""}`;
           case "stuck": return `STUCK [${d.source}] ${d.hint || ""}`;
           case "failure": return `FAILURE ${d.reason} -> ${d.file || ""}`;
           case "checkpoint": return `checkpoint ${d.action}: ${d.label || ""}`;
@@ -377,12 +375,20 @@
         $("sInv").textContent = (d.inventory && d.inventory.length) ? d.inventory.map((i) => `${i.name}×${i.count}`).join(", ") : "empty";
       }
 
-      function applyPhase(d) {
+      function applyPhase(d, t) {
+        // Use the event's recorded timestamp (not Date.now()) so durations stay
+        // correct when history is replayed after a page refresh/reconnect.
+        const at = t ?? Date.now();
         if (d.action === "start") {
-          phases.push({ name: d.phase, start: Date.now(), status: "running" });
+          // Phases run strictly sequentially, so a phase can only have one live
+          // row. A second "start" for an already-running phase is the bot
+          // restarting mid-phase (the run was aborted on respawn before emitting
+          // a completion); keep the existing row instead of adding a stuck dupe.
+          if (phases.some((p) => p.name === d.phase && p.status === "running")) return;
+          phases.push({ name: d.phase, start: at, status: "running" });
         } else {
           const p = [...phases].reverse().find((x) => x.name === d.phase && x.status === "running");
-          if (p) { p.status = d.action === "complete" ? "done" : "fail"; p.end = Date.now(); }
+          if (p) { p.status = d.action === "complete" ? "done" : "fail"; p.end = at; }
         }
         renderTimeline();
       }
@@ -408,7 +414,7 @@
 
       function dispatch(e) {
         if (e.type === "state") applyState(e.data);
-        else if (e.type === "phase") applyPhase(e.data);
+        else if (e.type === "phase") applyPhase(e.data, e.t);
         else if (e.type === "stuck") showBanner(e.data);
         addFeed(e);
       }
@@ -532,6 +538,9 @@
             $("runCtlHead").style.display = hasRun ? "" : "none";
             applyRunState(msg.runState || "idle");
             if (msg.hasTests) seedTests(msg.tests, msg.testParallel);
+            // Fresh snapshot: clear timeline state so replayed history rebuilds it
+            // from scratch (prevents duplicated phases on reconnect).
+            phases = [];
             (msg.history || []).forEach((e) => dispatch(e));
           } else if (msg.kind === "run-state") {
             applyRunState(msg.state);

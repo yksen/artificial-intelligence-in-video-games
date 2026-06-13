@@ -3,7 +3,6 @@ import { join, isAbsolute } from "node:path";
 import { HARNESS } from "./config.js";
 import type { HarnessEvent } from "./events.js";
 
-
 export function resolveRunDir(arg?: string): string {
   if (!arg) {
     const runs = listRuns();

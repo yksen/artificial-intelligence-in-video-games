@@ -12,6 +12,7 @@ export class MinecraftServerController {
   private logStream: WriteStream | null = null;
   private expectRunning = false;
   private bootedOnce = false;
+  private exitGuard: (() => void) | null = null;
 
   private levelSeed: string = HARNESS.levelSeed;
   private freshWorld: boolean = HARNESS.freshWorld;
@@ -111,6 +112,17 @@ export class MinecraftServerController {
       cwd: HARNESS.serverDir,
     }) as ChildProcessWithoutNullStreams;
 
+    const child = this.proc;
+    this.exitGuard = () => {
+      if (child.exitCode === null && child.signalCode === null) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+        }
+      }
+    };
+    process.on("exit", this.exitGuard);
+
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       const readyTimer = setTimeout(() => {
@@ -140,6 +152,10 @@ export class MinecraftServerController {
       this.proc!.on("exit", (code, signal) => {
         const wasExpected = this.expectRunning;
         this.state = "stopped";
+        if (this.exitGuard) {
+          process.removeListener("exit", this.exitGuard);
+          this.exitGuard = null;
+        }
         this.logStream?.end();
         this.record(`Server process exited`, { code, signal, wasExpected });
         this.proc = null;

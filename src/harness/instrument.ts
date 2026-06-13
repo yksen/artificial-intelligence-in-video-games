@@ -2,7 +2,6 @@ import type { Bot } from "mineflayer";
 import { HARNESS } from "./config.js";
 import type { Recorder } from "./events.js";
 
-
 let opIdCounter = 0;
 
 export function attachInstrumentation(bot: Bot, recorder: Recorder): void {
@@ -193,7 +192,6 @@ function wrapDig(bot: Bot, recorder: Recorder): void {
     },
   );
 }
-
 
 function posObj(p: any): { x: number; y: number; z: number } | undefined {
   if (p && typeof p.x === "number") return { x: p.x, y: p.y, z: p.z };

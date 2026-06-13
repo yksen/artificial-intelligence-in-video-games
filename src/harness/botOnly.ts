@@ -14,6 +14,7 @@ import { Dashboard } from "./dashboard/server.js";
 import { TestRunner } from "./dashboard/testRunner.js";
 import { attachInstrumentation } from "./instrument.js";
 import { MinecraftBot } from "../bot.js";
+import { botEvents } from "../events.js";
 
 async function main(): Promise<void> {
   const recorder = new Recorder(HARNESS.runsRoot);
@@ -50,19 +51,18 @@ async function main(): Promise<void> {
     },
   }, new TestRunner());
 
-  logger.addSink((level, message) => {
-    recorder.record("log", { level, message });
-    let m: RegExpMatchArray | null;
-    if ((m = message.match(/Starting phase (\d+)\/(\d+): (.+)$/))) {
-      recorder.record("phase", { action: "start", phase: m[3]!, index: +m[1]! - 1, total: +m[2]! });
-    } else if ((m = message.match(/Phase "(.+?)" completed successfully/))) {
-      recorder.record("phase", { action: "complete", phase: m[1]! });
-    } else if ((m = message.match(/Phase "(.+?)" failed/))) {
-      recorder.record("phase", { action: "fail", phase: m[1]! });
-    } else if ((m = message.match(/Waiting ~(\d+)s for smelting/))) {
-      watchdog.grantGrace((+m[1]! + 30) * 1000);
-    }
-  });
+  logger.addSink((level, message) => recorder.record("log", { level, message }));
+
+  botEvents.on("phase:start", (e) =>
+    recorder.record("phase", { action: "start", phase: e.phase, index: e.index, total: e.total }),
+  );
+  botEvents.on("phase:complete", (e) =>
+    recorder.record("phase", { action: "complete", phase: e.phase, index: e.index, total: e.total }),
+  );
+  botEvents.on("phase:fail", (e) =>
+    recorder.record("phase", { action: "fail", phase: e.phase, index: e.index, total: e.total }),
+  );
+  botEvents.on("smelt:wait", (e) => watchdog.grantGrace((e.seconds + 30) * 1000));
 
   watchdog.onStuck = (d) => {
     void diagnostics.capture("stuck", { diagnosis: d, hint: d.hint });

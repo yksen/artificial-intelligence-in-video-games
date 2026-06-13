@@ -2,7 +2,6 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, createWriteStream, type WriteStream } from "node:fs";
 import { join } from "node:path";
 
-
 export type HarnessEventType =
   | "state"
   | "op:start"
