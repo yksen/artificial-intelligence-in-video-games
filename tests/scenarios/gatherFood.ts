@@ -1,4 +1,5 @@
 import { defineScenario } from "../scenario.js";
+import { phaseContext } from "../testBot.js";
 import { getFoodCount } from "../../src/utils/survival.js";
 import { gatherFoodPhase } from "../../src/phases/gatherFood.js";
 
@@ -25,7 +26,7 @@ defineScenario({
   },
 
   async run(ctx) {
-    await gatherFoodPhase.execute(ctx.bot);
+    await gatherFoodPhase.execute(phaseContext(ctx.bot, "Gather Food"));
   },
 
   success(ctx) {

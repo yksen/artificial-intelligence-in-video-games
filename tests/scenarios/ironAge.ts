@@ -1,6 +1,8 @@
 import { defineScenario } from "../scenario.js";
+import { phaseContext } from "../testBot.js";
 import { hasItem, hasPickaxeTier } from "../../src/utils/inventory.js";
 import { ironAgePhase } from "../../src/phases/ironAge.js";
+import { oreField } from "../arena.js";
 
 defineScenario({
   name: "iron-age",
@@ -9,7 +11,7 @@ defineScenario({
   timeoutMs: 180_000,
 
   async setup(ctx) {
-    await ctx.fill(3, 4, -1, 4, 6, 1, "iron_ore");
+    await oreField(ctx, { x: 4, z: -1, ore: "iron_ore", count: 8, pad: 1 });
 
     await ctx.clearInventory();
     await ctx.give("stone_pickaxe", 1);
@@ -24,7 +26,7 @@ defineScenario({
   },
 
   async run(ctx) {
-    await ironAgePhase.execute(ctx.bot);
+    await ironAgePhase.execute(phaseContext(ctx.bot, "Iron Age"));
   },
 
   success(ctx) {

@@ -8,8 +8,7 @@ import "./diamondMine.js";
 import "./obsidian.js";
 import "./netherPortalBuild.js";
 
-import "./netherResources.js";
+import "./blazeRods.js";
 import "./gatherGold.js";
 import "./gatherPearls.js";
-import "./eyesOfEnder.js";
 import "./enterEnd.js";

@@ -1,15 +1,16 @@
 import { defineScenario } from "../scenario.js";
+import { phaseContext } from "../testBot.js";
 import { hasItem, hasPickaxeTier } from "../../src/utils/inventory.js";
 import { stoneAgePhase } from "../../src/phases/stoneAge.js";
 
 defineScenario({
   name: "stone-age",
-  description: "Mine a stone hill and craft stone tools + a furnace",
+  description: "Dig down to a buried stone deposit and craft stone tools + a furnace",
   difficulty: "peaceful",
   timeoutMs: 150_000,
 
   async setup(ctx) {
-    await ctx.fill(3, 4, -1, 6, 6, 1, "stone");
+    await ctx.fill(2, 1, -2, 6, 2, 2, "stone");
     await ctx.clearInventory();
     await ctx.give("wooden_pickaxe", 1);
     await ctx.give("oak_planks", 16);
@@ -19,7 +20,7 @@ defineScenario({
   },
 
   async run(ctx) {
-    await stoneAgePhase.execute(ctx.bot);
+    await stoneAgePhase.execute(phaseContext(ctx.bot, "Stone Age"));
   },
 
   success(ctx) {

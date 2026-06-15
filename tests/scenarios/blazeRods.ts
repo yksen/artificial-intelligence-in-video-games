@@ -4,7 +4,7 @@ import { buildNetherPortal, lightPortal, enterPortal } from "../../src/utils/bui
 import { gatherBlazeRods } from "../../src/phases/netherResources.js";
 
 defineScenario({
-  name: "nether-resources",
+  name: "blaze-rods",
   description: "Enter the Nether and farm a fortress blaze spawner for rods (combat)",
   difficulty: "easy",
   timeoutMs: 240_000,

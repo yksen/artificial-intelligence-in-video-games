@@ -1,4 +1,5 @@
 import { defineScenario, type ScenarioCtx } from "../scenario.js";
+import { phaseContext } from "../testBot.js";
 import { hasItem, hasPickaxeTier } from "../../src/utils/inventory.js";
 import { gatherWoodPhase } from "../../src/phases/gatherWood.js";
 
@@ -24,7 +25,7 @@ defineScenario({
   },
 
   async run(ctx) {
-    await gatherWoodPhase.execute(ctx.bot);
+    await gatherWoodPhase.execute(phaseContext(ctx.bot, "Gather Wood"));
   },
 
   success(ctx) {

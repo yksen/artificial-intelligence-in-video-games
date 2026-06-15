@@ -1,15 +1,16 @@
 import { defineScenario } from "../scenario.js";
 import { countItem } from "../../src/utils/inventory.js";
 import { gatherGold } from "../../src/phases/netherResources.js";
+import { oreField } from "../arena.js";
 
 defineScenario({
   name: "gather-gold",
-  description: "Mine nether gold ore and craft the nuggets into ingots for bartering",
+  description: "Mine a nether gold ore vein in a netherrack patch and craft nuggets into ingots",
   difficulty: "peaceful",
   timeoutMs: 180_000,
 
   async setup(ctx) {
-    await ctx.fill(3, 3, -3, 9, 3, 3, "nether_gold_ore");
+    await oreField(ctx, { x: 3, z: -3, ore: "nether_gold_ore", count: 25, base: "netherrack", pad: 1 });
     await ctx.clearInventory();
     await ctx.give("iron_pickaxe", 1);
     await ctx.give("crafting_table", 1);

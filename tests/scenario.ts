@@ -1,7 +1,6 @@
 import type { Bot } from "mineflayer";
 import type { RconClient } from "../src/harness/rcon.js";
 
-
 export interface ScenarioCtx {
   bot: Bot;
   rcon: RconClient;

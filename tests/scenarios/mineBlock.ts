@@ -1,15 +1,16 @@
 import { defineScenario } from "../scenario.js";
 import { countItem } from "../../src/utils/inventory.js";
 import { findAndMineBlocks } from "../../src/utils/mining.js";
+import { oreField } from "../arena.js";
 
 defineScenario({
   name: "mine-iron-ore",
-  description: "Walk to and mine a placed iron ore block",
+  description: "Walk to and mine an iron ore vein exposed in a rocky patch",
   difficulty: "peaceful",
   timeoutMs: 90_000,
 
   async setup(ctx) {
-    await ctx.setblock(5, 3, 0, "iron_ore");
+    await oreField(ctx, { x: 5, z: 0, ore: "iron_ore", count: 1, pad: 1 });
     await ctx.clearInventory();
     await ctx.give("stone_pickaxe", 1);
     await ctx.tp(0, 4, 0);
